@@ -1,0 +1,225 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #030712;
+  --surface: #111827;
+  --surface2: #1f2937;
+  --border: #374151;
+  --accent: #3b82f6;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: #f9fafb;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #111827; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+
+/* Tabla */
+.tabla-base {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.tabla-base th {
+  background: #1f2937;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #9ca3af;
+  border-bottom: 1px solid #374151;
+  white-space: nowrap;
+}
+.tabla-base td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #1f2937;
+  vertical-align: middle;
+}
+.tabla-base tbody tr:hover td {
+  background: #1f2937;
+}
+
+/* Badge estados — 5 estados */
+.badge-green  { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+.badge-orange { background: #2c1a07; color: #fb923c; border: 1px solid #9a3412; }
+.badge-blue   { background: #0c1a33; color: #60a5fa; border: 1px solid #1e40af; }
+.badge-yellow { background: #2c1f00; color: #fbbf24; border: 1px solid #854d0e; }
+.badge-red    { background: #1c0101; color: #f87171; border: 1px solid #7f1d1d; }
+.badge-gray   { background: #111827; color: #9ca3af; border: 1px solid #374151; }
+/* Legacy aliases */
+.badge-plazo      { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+.badge-vencer     { background: #2c1f00; color: #fbbf24; border: 1px solid #854d0e; }
+.badge-fuera      { background: #1c0101; color: #f87171; border: 1px solid #7f1d1d; }
+.badge-fuera-plazo{ background: #1c0101; color: #f87171; border: 1px solid #7f1d1d; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Input base */
+.input-base {
+  background: #1f2937;
+  border: 1px solid #374151;
+  color: #f9fafb;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input-base:focus { border-color: #3b82f6; }
+
+/* Botones */
+.btn-primary {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.85; }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid #374151;
+  color: #9ca3af;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.btn-ghost:hover { border-color: #3b82f6; color: #3b82f6; }
+
+.btn-danger {
+  background: transparent;
+  border: 1px solid #7f1d1d;
+  color: #f87171;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-danger:hover { background: #1c0101; }
+
+/* Card */
+.card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+/* Progreso bar */
+.prog-bar {
+  width: 80px;
+  height: 6px;
+  background: #374151;
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+.prog-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #3b82f6;
+  transition: width 0.3s;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.modal-box {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 740px;
+  max-height: 92vh;
+  overflow-y: auto;
+}
+.modal-header {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid #1f2937;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  background: #111827;
+  z-index: 5;
+}
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid #1f2937;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  background: #111827;
+}
+
+/* Gantt */
+.gantt-bar {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 4px;
+  cursor: pointer;
+}
+.gantt-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #3b82f6;
+  z-index: 10;
+  pointer-events: none;
+}

@@ -1,0 +1,1491 @@
+'use client'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useParams } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import {
+  calcularCamposOT, calcularCamposConEficiencia, getEstadoInfo, getEficienciaLabel, getEficiencia,
+  getDiasRestantes, fmtFecha, fmtMoneda, getNombreOT, generarCodigoOT, colLetra
+} from '@/lib/formulas'
+import { exportarExcel, importarExcel } from '@/lib/excel'
+import ModalOT from '@/components/ModalOT'
+import GanttModulo from '@/components/GanttModulo'
+import {
+  getCfg, buildBody, generarHTMLDoc, generarHTMLLote, descargarWord
+} from './docConfig'
+import { descargarWordTemplate } from './wordGen'
+
+// ── Columnas base — orden exacto según especificación ─────────
+const CAMPOS_BASE = [
+  { key: 'numero_registro',    label: 'N° Registro',     always: true  },
+  { key: 'numero_ot',          label: 'N° OT',           always: false },
+  { key: 'contratista',        label: 'Contratista',     always: false },
+  { key: 'actividad',          label: 'Actividad',       always: false },
+  { key: 'motivo_ot',          label: 'Motivo OT',       always: false },
+  { key: 'semana',             label: 'Semana',          always: false },
+  { key: 'contrato',           label: 'Contrato',        always: false },
+  { key: 'progreso',           label: 'Progreso',        always: false },
+  { key: 'fecha_inicio',       label: 'F. Inicio',       always: false },
+  { key: 'fecha_fin_trabajos', label: 'F. Fin',          always: false },
+  { key: 'fecha_limite',       label: 'F. Límite',       always: true  },
+  { key: 'dias_plazo',         label: 'Días Plazo',      always: false },
+  { key: 'cantidad',           label: 'Cant.',           always: false },
+  { key: 'fecha_reporte',      label: 'F. Reporte',      always: false },
+  { key: 'estado',             label: 'Estado',          always: true  },
+  { key: 'duracion_real',      label: 'Dur. Real',       always: false },
+  { key: 'dias_fuera',         label: 'D. Fuera',        always: false },
+  { key: 'val_pen',            label: 'Val. Pen.',       always: false },
+  { key: 'val_total',          label: 'Val. Total',      always: false },
+  { key: 'observaciones',      label: 'Observaciones',   always: false },
+  { key: 'eficiencia',         label: 'Eficiencia',      always: false },
+  { key: 'accion_doc',         label: 'Doc',             always: false },
+]
+
+export default function ModuloPage() {
+  const { id } = useParams()
+  const [tab, setTab] = useState('tabla')
+  const [modulo, setModulo] = useState(null)
+  const [ots, setOts] = useState([])
+  const [contratistas, setContratistas] = useState([])
+  const [camposExtra, setCamposExtra] = useState([])
+  const [periodo, setPeriodo] = useState('2026-I')
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [buscar, setBuscar] = useState('')
+  const [filtContratista, setFiltContratista] = useState('')
+  const [filtEstado, setFiltEstado] = useState('')
+  const [importando, setImportando] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [seleccionados, setSeleccionados] = useState(new Set())
+  const [modoEliminar, setModoEliminar] = useState(false)
+  const tablaRef = useRef(null)
+  // Modales
+  const [modalCampo, setModalCampo] = useState(false)
+  const [modalDoc, setModalDoc] = useState(false)
+  const [modalTodas, setModalTodas] = useState(false)
+  const [otParaDoc, setOtParaDoc] = useState(null)
+  const [docForm, setDocForm] = useState({})
+  const [versionFirma, setVersionFirma] = useState('espacios') // 'sin_firmas' | 'espacios' | 'firmado'
+  // Edición en bloque
+  const [loteEditando, setLoteEditando] = useState([])
+  const [tipoLote, setTipoLote] = useState('pdf')
+  // Nuevo campo — estilo Excel
+  const [nuevoCampo, setNuevoCampo] = useState({ nombre: '', clave: '', tipo: 'texto', opciones: '', obligatorio: false, en_tabla: true, insertarEn: -2 })
+
+  const [colsVisibles, setColsVisibles] = useState(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem(`cols_${id}`) || '{}') } catch { return {} }
+  })
+  const [sortCfg, setSortCfg] = useState({ key: 'numero_registro', dir: 'asc' })
+  const [camposTabOrder, setCamposTabOrder] = useState(null)
+  const [columnFilters, setColumnFilters] = useState({})
+
+  function setColFilter(key, val) {
+    setColumnFilters(prev => ({ ...prev, [key]: val }))
+  }
+  function toggleSort(key) {
+    setSortCfg(prev => ({ key, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }))
+  }
+
+  const cargar = useCallback(async () => {
+    const [{ data: mod }, { data: otsData }, { data: conts }, { data: campos }, { data: cfg }] = await Promise.all([
+      supabase.from('modulos').select('*').eq('id', id).single(),
+      supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
+      supabase.from('contratistas').select('*').eq('activo', true).order('nombre'),
+      supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
+      supabase.from('config_global').select('*'),
+    ])
+    const p = cfg?.find(c => c.clave === 'periodo')?.valor || '2026-I'
+    setPeriodo(p)
+    setModulo(mod)
+    setContratistas(conts || [])
+    setCamposExtra(campos || [])
+    // numero_registro is always the positional row number within this module
+    // Sort by id (insertion order) to get consistent numbering
+    const sortedOts = (otsData || []).slice().sort((a,b) => a.id - b.id)
+    const calculadas = sortedOts.map((ot, idx) => {
+      const cont = (conts || []).find(c => c.id === ot.contratista_id)
+      return {
+        ...ot,
+        numero_registro: String(idx + 1),  // always positional, never from DB
+        ...calcularCamposConEficiencia(ot, cont, p),
+        _cont: cont
+      }
+    })
+    setOts(calculadas)
+    setLoading(false)
+  }, [id])
+
+  useEffect(() => { cargar() }, [cargar])
+
+  // Auto-scroll al último registro cuando cargan los datos
+  useEffect(() => {
+    if (ots.length > 0) {
+      setTimeout(() => {
+        if (tablaRef.current) tablaRef.current.scrollTop = tablaRef.current.scrollHeight
+      }, 100)
+    }
+  }, [ots])
+
+  function isColVisible(key) {
+    if (colsVisibles[key] === false) return false
+    return true
+  }
+  function toggleCol(key) {
+    const nuevo = { ...colsVisibles, [key]: !isColVisible(key) }
+    setColsVisibles(nuevo)
+    localStorage.setItem(`cols_${id}`, JSON.stringify(nuevo))
+  }
+
+  // Tipo de módulo — disponible desde aquí para todo el componente
+  const esOT = modulo?.tipo === 'ot'
+  function idPrincipal(reg) {
+    return esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
+  }
+  function labelId() { return esOT ? 'N° OT' : 'N° Registro' }
+
+  const stats = {
+    total: ots.length,
+    cumplió_tiempo: ots.filter(o => o.estado === 1).length,
+    cumplió_tarde: ots.filter(o => o.estado === 2).length,
+    en_proceso: ots.filter(o => o.estado === 3).length,
+    por_vencer: ots.filter(o => o.estado === 4).length,
+    fuera: ots.filter(o => o.estado === 5).length,
+    pen_total: ots.reduce((s, o) => s + (o.val_total_penalidad || 0), 0),
+  }
+
+  const otsFiltradas = ots.filter(ot => {
+    const idBusca = esOT ? `${ot.numero_ot} ${ot.numero_registro}` : ot.numero_registro
+    const txt = `${idBusca} ${ot._cont?.nombre || ''} ${ot.actividad || ''} ${ot.motivo_ot || ''} ${ot.semana || ''} ${ot.observaciones || ''}`.toLowerCase()
+    if (buscar && !txt.includes(buscar.toLowerCase())) return false
+    if (filtContratista && String(ot.contratista_id) !== filtContratista) return false
+    if (filtEstado && String(ot.estado) !== filtEstado) return false
+    // Column-level filters
+    for (const [key, val] of Object.entries(columnFilters)) {
+      if (!val) continue
+      const v = String(val).toLowerCase()
+      if (key === 'semana' && !(ot.semana || '').toLowerCase().includes(v)) return false
+      if (key === 'actividad' && !(ot.actividad || '').toLowerCase().includes(v)) return false
+      if (key === 'motivo_ot' && !(ot.motivo_ot || '').toLowerCase().includes(v)) return false
+      if (key === 'fecha_inicio' && !(ot.fecha_inicio || '').includes(val)) return false
+      if (key === 'fecha_limite' && !(ot.fecha_limite_expedientes || '').includes(val)) return false
+      if (key === 'fecha_reporte' && !(ot.fecha_reporte || '').includes(val)) return false
+      if (key === 'cantidad' && ot.cantidad_programada !== undefined) {
+        if (!String(ot.cantidad_programada || '').includes(v)) return false
+      }
+    }
+    return true
+  }).slice().sort((a, b) => {
+    const { key, dir } = sortCfg
+    const mult = dir === 'asc' ? 1 : -1
+    if (key === 'numero_registro') return mult * (parseInt(a.numero_registro) - parseInt(b.numero_registro))
+    if (key === 'fecha_inicio') return mult * (a.fecha_inicio || '').localeCompare(b.fecha_inicio || '')
+    if (key === 'fecha_limite') return mult * (a.fecha_limite_expedientes || '').localeCompare(b.fecha_limite_expedientes || '')
+    if (key === 'fecha_reporte') return mult * (a.fecha_reporte || '').localeCompare(b.fecha_reporte || '')
+    if (key === 'cantidad') return mult * ((a.cantidad_programada || 0) - (b.cantidad_programada || 0))
+    if (key === 'estado') return mult * ((a.estado || 0) - (b.estado || 0))
+    if (key === 'contratista') return mult * (a._cont?.nombre || '').localeCompare(b._cont?.nombre || '')
+    if (key === 'semana') return mult * (a.semana || '').localeCompare(b.semana || '')
+    return 0
+  })
+
+  async function eliminar(id_ot) {
+    if (!confirm('¿Eliminar este registro?')) return
+    await supabase.from('ots').delete().eq('id', id_ot)
+    cargar()
+  }
+
+  async function eliminarSeleccionados() {
+    if (seleccionados.size === 0) return
+    if (!confirm(`¿Eliminar ${seleccionados.size} registro(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return
+    const ids = Array.from(seleccionados)
+    await supabase.from('ots').delete().in('id', ids)
+    setSeleccionados(new Set())
+    setModoEliminar(false)
+    cargar()
+  }
+
+  function toggleSeleccion(id_ot) {
+    setSeleccionados(prev => {
+      const next = new Set(prev)
+      if (next.has(id_ot)) next.delete(id_ot)
+      else next.add(id_ot)
+      return next
+    })
+  }
+
+  function seleccionarTodas() {
+    if (seleccionados.size === otsFiltradas.length) setSeleccionados(new Set())
+    else setSeleccionados(new Set(otsFiltradas.map(o => o.id)))
+  }
+
+  async function handleImport(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setImportando(true); setImportResult(null)
+    try {
+      const actividades = Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')
+      // baseIndex = total actual de registros, para que numero_registro siga la secuencia
+      const { ots: otsImport, errores, advertencias } = await importarExcel(file, contratistas, parseInt(id), actividades, ots.length, camposExtra)
+      if (otsImport.length > 0) {
+        const { error } = await supabase.from('ots').insert(otsImport)
+        if (error) throw new Error(error.message)
+        await cargar()
+      }
+      setImportResult({ ok: otsImport.length, errores, advertencias })
+    } catch (err) { setImportResult({ error: err.message || String(err) }) }
+    setImportando(false); e.target.value = ''
+  }
+
+  async function moverCampo(campoId, dir) {
+    const sorted = [...camposExtra].sort((a, b) => a.orden - b.orden)
+    const pos = sorted.findIndex(x => x.id === campoId)
+    if (dir === 'up' && pos === 0) return
+    if (dir === 'down' && pos === sorted.length - 1) return
+    const swapWith = dir === 'up' ? sorted[pos - 1] : sorted[pos + 1]
+    const current = sorted[pos]
+    await Promise.all([
+      supabase.from('modulo_campos').update({ orden: swapWith.orden }).eq('id', current.id),
+      supabase.from('modulo_campos').update({ orden: current.orden }).eq('id', swapWith.id)
+    ])
+    cargar()
+  }
+
+  async function guardarCampo() {
+    if (!nuevoCampo.nombre || !nuevoCampo.clave) return
+    const clave = nuevoCampo.clave.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+    const colsTotal = todasColsOrdenadas.filter(c => c.key !== 'acciones')
+    let insertIdx
+    if (nuevoCampo.insertarEn === -1) insertIdx = 0
+    else if (nuevoCampo.insertarEn === -2) insertIdx = colsTotal.length
+    else insertIdx = Math.min(nuevoCampo.insertarEn + 1, colsTotal.length)
+    await supabase.from('modulo_campos').insert({
+      modulo_id: parseInt(id), nombre: nuevoCampo.nombre, clave,
+      tipo: nuevoCampo.tipo, opciones: nuevoCampo.opciones || null,
+      obligatorio: nuevoCampo.obligatorio, en_tabla: true, orden: insertIdx,
+    })
+    try {
+      const currentOrder = JSON.parse(localStorage.getItem(`cols_order_${id}`) || 'null')
+      if (currentOrder) {
+        const savedInsertIdx = Math.max(0, insertIdx - 1)
+        currentOrder.splice(savedInsertIdx, 0, clave)
+        localStorage.setItem(`cols_order_${id}`, JSON.stringify(currentOrder))
+      } else {
+        const baseOrder = todasColsOrdenadas
+          .filter(c => c.key !== 'numero_registro' && c.key !== 'acciones')
+          .map(c => c.key.startsWith('extra_') ? (camposExtra.find(x => `extra_${x.id}` === c.key)?.clave || c.key) : c.key)
+        baseOrder.splice(Math.max(0, insertIdx - 1), 0, clave)
+        localStorage.setItem(`cols_order_${id}`, JSON.stringify(baseOrder))
+      }
+    } catch(e) { console.warn('localStorage error', e) }
+    setModalCampo(false)
+    setNuevoCampo({ nombre: '', clave: '', tipo: 'texto', opciones: '', obligatorio: false, en_tabla: true, insertarEn: -2 })
+    cargar()
+  }
+  async function eliminarCampo(campoId) {
+    if (!confirm('¿Eliminar este campo?')) return
+    await supabase.from('modulo_campos').delete().eq('id', campoId)
+    cargar()
+  }
+
+  function abrirModalDoc(ot) {
+    const cont = contratistas.find(c => c.id === ot.contratista_id)
+    const hoy = new Date().toISOString().slice(0, 10)
+    const codigoOT = generarCodigoOT(ot.semana, periodo)
+    setDocForm(buildDocForm(ot, cont, codigoOT, hoy))
+    setOtParaDoc(ot)
+    setVersionFirma('espacios')
+    setModalDoc(true)
+  }
+
+  function buildDocForm(ot, cont, codigoOT, hoy) {
+    return {
+      numero_ot: ot.numero_ot || ot.numero_registro,
+      codigo_ot: codigoOT,
+      contrato: cont?.contrato || '',
+      semana: ot.semana || '',
+      fecha_inicio: ot.fecha_inicio || '',
+      fecha_fin: ot.fecha_fin_trabajos || '',
+      fecha_limite: ot.fecha_limite_expedientes || '',
+      dias_plazo: ot.dias_plazo || '',
+      cantidad: ot.cantidad_programada || '',
+      actividad_doc: modulo?.plantilla_actividad || ot.actividad || '',
+      fecha_entrega: hoy,
+      observaciones: ot.observaciones || 'Ninguna',
+      cumplimiento: modulo?.plantilla_cumplimiento || '',
+      actividad_label: modulo?.plantilla_actividad || '',
+      editado_por: modulo?.plantilla_editado_por || '',
+      titulo: modulo?.plantilla_titulo || '',
+      coordinador: 'CONSORCIO SUPERVISOR',
+      area_usuaria: 'ELECTROPUNO S.A.A',
+      contratista_nombre: cont?.nombre || '',
+    }
+  }
+
+
+
+  function abrirLote() {
+    const hoy = new Date().toISOString().slice(0, 10)
+    const formsInit = otsFiltradas.map(ot => {
+      const cont = contratistas.find(c => c.id === ot.contratista_id)
+      return {
+        _id: ot.id, _actividad: ot.actividad, _sel: true,
+        ...buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
+      }
+    })
+    setLoteEditando(formsInit)
+    setTipoLote('pdf')
+    setVersionFirma('espacios')
+    setModalTodas(true)
+  }
+
+  if (loading) return (
+    <div className="flex flex-col h-full animate-pulse">
+      <div className="px-6 py-3 border-b border-gray-800 flex items-center gap-3" style={{background:'#0f172a'}}>
+        <div className="w-9 h-9 rounded-lg bg-gray-800"/>
+        <div><div className="h-4 w-40 bg-gray-800 rounded mb-1"/><div className="h-3 w-56 bg-gray-900 rounded"/></div>
+      </div>
+      <div className="grid gap-3 px-6 py-3" style={{gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))'}}>
+        {[1,2,3,4,5,6].map(i=><div key={i} className="h-16 bg-gray-900 rounded-lg"/>)}
+      </div>
+      <div className="px-6 pb-2"><div className="h-8 bg-gray-900 rounded-lg w-full"/></div>
+      <div className="px-6 flex-1"><div className="rounded-xl border border-gray-800 overflow-hidden">
+        {[1,2,3,4,5].map(i=><div key={i} className="h-10 border-b border-gray-900 bg-gray-950"/>)}
+      </div></div>
+    </div>
+  )
+  if (!modulo) return <div className="p-6 text-gray-400">Módulo no encontrado.</div>
+
+  const actividades = Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')
+  const motivos = Array.isArray(modulo.motivos) ? modulo.motivos : JSON.parse(modulo.motivos || '[]')
+  const tienePlantilla = !!modulo.plantilla_titulo
+
+  // Columnas visibles para la vista previa estilo Excel
+  const colsActivasBase = CAMPOS_BASE.filter(c => {
+    if (c.key === 'val_pen' || c.key === 'val_total') return modulo.tiene_penalidad
+    if (c.key === 'contratista') return esOT && contratistas.length > 0
+    if (c.key === 'numero_ot')   return esOT
+    if (c.key === 'motivo_ot')   return esOT
+    if (c.key === 'contrato')    return esOT
+    if (c.key === 'accion_doc')  return esOT && tienePlantilla
+    return true
+  }).filter(c => isColVisible(c.key))
+
+  // Orden unificado guardado al crear el módulo
+  const savedOrder = (() => {
+    if (typeof window === 'undefined') return null
+    try { return JSON.parse(localStorage.getItem(`cols_order_${id}`) || 'null') } catch { return null }
+  })()
+
+  const todasColsOrdenadas = (() => {
+    const result = [{ key: 'numero_registro', label: 'N° Reg.' }]
+    const baseKeys = new Set(CAMPOS_BASE.map(c => c.key))
+    const baseColMap = Object.fromEntries(CAMPOS_BASE.map(c => [c.key, { key: c.key, label: c.label }]))
+    const extraByClave = Object.fromEntries(
+      camposExtra.filter(c => c.en_tabla).map(c => [c.clave, { key: `extra_${c.id}`, label: c.nombre, id: c.id }])
+    )
+    const extraUsados = new Set()
+    if (savedOrder && savedOrder.length > 0) {
+      savedOrder.forEach(k => {
+        if (k === 'numero_registro' || k === 'acciones') return
+        if (baseKeys.has(k)) {
+          if (isColVisible(k) && baseColMap[k]) result.push(baseColMap[k])
+        } else {
+          const extra = extraByClave[k]
+          if (extra) { result.push(extra); extraUsados.add(extra.id) }
+        }
+      })
+      camposExtra.filter(c => c.en_tabla && !extraUsados.has(c.id))
+        .sort((a,b) => a.orden - b.orden)
+        .forEach(c => result.push({ key: `extra_${c.id}`, label: c.nombre }))
+    } else {
+      colsActivasBase.filter(c => c.key !== 'numero_registro').forEach(c => result.push(c))
+      camposExtra.filter(c => c.en_tabla).sort((a,b) => a.orden - b.orden)
+        .forEach(c => result.push({ key: `extra_${c.id}`, label: c.nombre }))
+    }
+    result.push({ key: 'acciones', label: 'Acciones' })
+    return result
+  })()
+
+  // Gestión de orden en pestaña Campos
+  const camposOrden = camposTabOrder || todasColsOrdenadas.filter(c => c.key !== 'acciones')
+
+  function guardarOrdenCampos(arr) {
+    const newOrder = arr
+      .filter(c => c.key !== 'numero_registro')
+      .map(c => {
+        if (c.key.startsWith('extra_')) {
+          const campo = camposExtra.find(x => `extra_${x.id}` === c.key)
+          return campo?.clave || c.key
+        }
+        return c.key
+      })
+    localStorage.setItem(`cols_order_${id}`, JSON.stringify(newOrder))
+    arr.forEach(async (col, i) => {
+      if (col.key.startsWith('extra_')) {
+        const campo = camposExtra.find(c => `extra_${c.id}` === col.key)
+        if (campo) await supabase.from('modulo_campos').update({ orden: i }).eq('id', campo.id)
+      }
+    })
+  }
+
+  function moverEnCampos(idx, dir) {
+    const arr = [...camposOrden]
+    const target = idx + dir
+    if (target < 0 || target >= arr.length) return
+    ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
+    setCamposTabOrder(arr)
+    guardarOrdenCampos(arr)
+  }
+
+  function activarColEnCampos(key) {
+    const col = CAMPOS_BASE.find(c => c.key === key)
+    if (!col) return
+    const nuevo = { ...colsVisibles, [key]: true }
+    setColsVisibles(nuevo)
+    localStorage.setItem(`cols_${id}`, JSON.stringify(nuevo))
+    const arr = [...camposOrden, { key, label: col.label }]
+    setCamposTabOrder(arr)
+    guardarOrdenCampos(arr)
+  }
+
+  function desactivarColEnCampos(idx) {
+    const col = camposOrden[idx]
+    if (!col || col.key === 'numero_registro') return
+    if (['estado', 'fecha_limite'].includes(col.key)) return
+    if (!col.key.startsWith('extra_')) {
+      const nuevo = { ...colsVisibles, [col.key]: false }
+      setColsVisibles(nuevo)
+      localStorage.setItem(`cols_${id}`, JSON.stringify(nuevo))
+    }
+    const arr = camposOrden.filter((_, i) => i !== idx)
+    setCamposTabOrder(arr)
+    guardarOrdenCampos(arr)
+  }
+
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-6 py-3 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2" style={{ background: '#0f172a' }}>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xl" style={{ background: `${modulo.color}20`, border: `1px solid ${modulo.color}40` }}>
+            {modulo.icono}
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white">{modulo.nombre}</h1>
+            <p className="text-xs text-gray-500">{modulo.descripcion}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap justify-end">
+          {tienePlantilla && (
+            <button className="btn-ghost text-xs" onClick={abrirLote}>📦 Generar por bloque</button>
+          )}
+          <label className="btn-ghost cursor-pointer text-xs">
+            {importando ? '⏳...' : '⬆️ Importar Excel'}
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} disabled={importando} />
+          </label>
+          <button className="btn-ghost text-xs" onClick={() => exportarExcel(otsFiltradas, contratistas, modulo, periodo, colsVisibles, camposExtra, todasColsOrdenadas.filter(c => c.key !== 'acciones' && c.key !== 'numero_registro'))}>⬇️ Exportar Excel</button>
+          <button className="btn-primary text-xs" onClick={() => { setEditando(null); setModalOpen(true) }}>+ Nuevo Registro</button>
+        </div>
+      </div>
+
+      {/* Resultado importación */}
+      {importResult && (
+        <div className={`mx-6 mt-3 p-3 rounded-lg border text-xs flex items-start justify-between gap-4 ${importResult.error ? 'border-red-800 bg-red-950 text-red-300' : 'border-green-800 bg-green-950 text-green-300'}`}>
+          <div>
+            {importResult.error ? <span>❌ {importResult.error}</span> : (
+              <div>
+                <div>✅ {importResult.ok} registro(s) importados.</div>
+                {importResult.advertencias?.slice(0, 5).map((a, i) => <div key={i} className="text-yellow-400 mt-1">{a}</div>)}
+                {importResult.errores?.slice(0, 3).map((e, i) => <div key={i} className="text-red-400 mt-1">❌ {e}</div>)}
+              </div>
+            )}
+          </div>
+          <button className="text-gray-400 hover:text-white flex-shrink-0" onClick={() => setImportResult(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Cards de estado */}
+      <div className="grid gap-3 px-6 py-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+        {[
+          { label: 'Total', value: stats.total, color: modulo.color },
+          { label: '✓ Cumplió a tiempo', value: stats.cumplió_tiempo, color: '#22c55e' },
+          { label: '⚠ Cumplió tarde', value: stats.cumplió_tarde, color: '#f97316' },
+          { label: '● En proceso', value: stats.en_proceso, color: '#3b82f6' },
+          { label: '⚡ Por vencer', value: stats.por_vencer, color: '#eab308' },
+          { label: '✗ Fuera de plazo', value: stats.fuera, color: '#ef4444' },
+          ...(modulo.tiene_penalidad && isColVisible('val_total') ? [{ label: '💰 Penalidades', value: fmtMoneda(stats.pen_total), color: '#f43f5e', small: true }] : []),
+        ].map((c, i) => (
+          <div key={i} className="card py-3 px-4" style={{ borderTop: `2px solid ${c.color}` }}>
+            <div className="text-xs text-gray-500 uppercase tracking-wider leading-tight">{c.label}</div>
+            <div className={`font-bold font-mono mt-1 ${c.small ? 'text-sm' : 'text-2xl'}`} style={{ color: c.color }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 px-6 border-b border-gray-800">
+        {[
+          { key: 'tabla', label: '📋 Listado' },
+          { key: 'gantt', label: '📅 Gantt' },
+          { key: 'dashboard', label: '📊 Dashboard' },
+          { key: 'campos', label: '⚙️ Campos' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-all ${tab === t.key ? 'border-blue-500 text-blue-400 bg-blue-950' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-auto px-6 py-4">
+
+        {/* ── TABLA ── */}
+        {tab === 'tabla' && (
+          <>
+            {/* ── Barra de filtros compacta ── */}
+            <div className="mb-3">
+              <div className="flex gap-1.5 items-center p-2 rounded-lg border border-gray-800" style={{background:'#0d1526'}}>
+                <input className="input-base text-xs" style={{width:150}} placeholder="🔍 Buscar..." value={buscar} onChange={e=>setBuscar(e.target.value)} />
+                <select className="input-base text-xs" style={{width:110}} value={filtEstado} onChange={e=>setFiltEstado(e.target.value)}>
+                  <option value="" disabled hidden>Estado</option>
+                  <option value="">Todos los estados</option>
+                  <option value="1">✓ Cumplió a tiempo</option>
+                  <option value="2">⚠ Cumplió tarde</option>
+                  <option value="3">● En proceso</option>
+                  <option value="4">⚡ Por vencer</option>
+                  <option value="5">✗ Fuera de plazo</option>
+                </select>
+                {isColVisible('contratista') && contratistas.length > 0 && (
+                  <select className="input-base text-xs" style={{width:130}} value={filtContratista} onChange={e=>setFiltContratista(e.target.value)}>
+                    <option value="" disabled hidden>Contratista</option>
+                    <option value="">Todos los contratistas</option>
+                    {contratistas.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                )}
+                {isColVisible('actividad') && actividades.length > 0 && (
+                  <select className="input-base text-xs" style={{width:110}} value={columnFilters.actividad||''} onChange={e=>setColFilter('actividad',e.target.value)}>
+                    <option value="" disabled hidden>Actividad</option>
+                    <option value="">Todas las actividades</option>
+                    {actividades.map(a=><option key={a} value={a}>{a}</option>)}
+                  </select>
+                )}
+                {isColVisible('motivo_ot') && motivos.length > 0 && (
+                  <select className="input-base text-xs" style={{width:100}} value={columnFilters.motivo_ot||''} onChange={e=>setColFilter('motivo_ot',e.target.value)}>
+                    <option value="" disabled hidden>Motivo</option>
+                    <option value="">Todos los motivos</option>
+                    {motivos.map(m=><option key={m} value={m}>{m}</option>)}
+                  </select>
+                )}
+                {isColVisible('semana') && (
+                  <select className="input-base text-xs" style={{width:100}} value={columnFilters.semana||''} onChange={e=>setColFilter('semana',e.target.value)}>
+                    <option value="" disabled hidden>Semana</option>
+                    <option value="">Todas las semanas</option>
+                    {[...new Set(ots.map(o=>o.semana).filter(Boolean))].sort().map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
+                {(isColVisible('fecha_inicio')||isColVisible('fecha_limite')||isColVisible('fecha_reporte')) && (
+                  <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
+                    onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
+                    📅 Fechas{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
+                  </button>
+                )}
+                {(buscar||filtEstado||filtContratista||Object.values(columnFilters).some(v=>v&&v!=='1')) && (
+                  <button className="text-xs px-2 py-1 rounded border border-red-900 text-red-400 hover:bg-red-950"
+                    onClick={()=>{setColumnFilters({});setFiltContratista('');setFiltEstado('');setBuscar('')}}>✕</button>
+                )}
+                <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs text-gray-500">{otsFiltradas.length}/{ots.length} registros</span>
+                  {!modoEliminar ? (
+                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>setModoEliminar(true)}>🗑️ Eliminar</button>
+                  ) : (
+                    <div className="flex gap-1 items-center">
+                      <button className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400" onClick={seleccionarTodas}>{seleccionados.size===otsFiltradas.length?'☐ Ninguna':'✅ Todas'}</button>
+                      <button className="btn-danger text-xs px-2 py-1" disabled={seleccionados.size===0} onClick={eliminarSeleccionados}>🗑️{seleccionados.size>0?` (${seleccionados.size})`:''}</button>
+                      <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{setModoEliminar(false);setSeleccionados(new Set())}}>✕</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {columnFilters._showFechas && (
+                <div className="flex gap-3 items-center mt-1.5 px-2 py-1.5 rounded-lg border border-blue-900" style={{background:'#0a1628'}}>
+                  <span className="text-xs text-gray-500 flex-shrink-0">Filtrar por mes:</span>
+                  {isColVisible('fecha_inicio') && <div className="flex items-center gap-1"><span className="text-xs text-gray-400">Inicio</span><input className="input-base text-xs" type="month" style={{width:150}} value={columnFilters.fecha_inicio||''} onChange={e=>setColFilter('fecha_inicio',e.target.value)} /></div>}
+                  {isColVisible('fecha_limite') && <div className="flex items-center gap-1"><span className="text-xs text-gray-400">Límite</span><input className="input-base text-xs" type="month" style={{width:150}} value={columnFilters.fecha_limite||''} onChange={e=>setColFilter('fecha_limite',e.target.value)} /></div>}
+                  {isColVisible('fecha_reporte') && <div className="flex items-center gap-1"><span className="text-xs text-gray-400">Reporte</span><input className="input-base text-xs" type="month" style={{width:150}} value={columnFilters.fecha_reporte||''} onChange={e=>setColFilter('fecha_reporte',e.target.value)} /></div>}
+                </div>
+              )}
+            </div>
+            {/* Tabla con header sticky */}
+            <div className="rounded-xl border border-gray-800 overflow-hidden">
+              <div ref={tablaRef} className="overflow-auto" style={{ maxHeight: 'calc(100vh - 400px)' }}>
+                <table className="tabla-base w-full">
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#0f172a' }}>
+                    <tr>
+                      {modoEliminar && <th className="w-8"><input type="checkbox" className="accent-blue-500" checked={seleccionados.size===otsFiltradas.length && otsFiltradas.length>0} onChange={seleccionarTodas} /></th>}
+                      {todasColsOrdenadas.map(col => {
+                        if (col.key === 'numero_registro') return <th key="nr" style={{width:36,minWidth:36,padding:'4px 2px',textAlign:'center',fontSize:'0.7rem',color:'#6b7280',borderRight:'none',background:'transparent',position:'sticky',left:0,zIndex:2}}>N°</th>
+                        if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} />
+                        if (col.key === 'acciones') return <th key="acc">Acciones</th>
+                        if (col.key.startsWith('extra_')) return <th key={col.key}>{col.label}</th>
+                        if (['contratista','semana','fecha_inicio','fecha_limite','fecha_reporte','cantidad','estado'].includes(col.key))
+                          return <SortTh key={col.key} k={col.key} label={col.label} sc={sortCfg} ts={toggleSort} />
+                        return <th key={col.key}>{col.label}</th>
+                      })}
+                    </tr>
+                  </thead><tbody>
+                    {otsFiltradas.length === 0 ? (
+                      <tr><td colSpan={30} className="text-center py-12 text-gray-600">Sin registros. Haz clic en "+ Nuevo Registro".</td></tr>
+                    ) : otsFiltradas.map(ot => {
+                      const info = getEstadoInfo(ot.estado)
+                      const dias = getDiasRestantes(ot.fecha_limite_expedientes)
+                      const pct = Math.round((ot.progreso || 0) * 100)
+                      const efInfo = getEficienciaLabel(ot.eficiencia)
+                      return (
+                        <tr key={ot.id}>
+                          {modoEliminar && <td className="px-2 text-center"><input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ot.id)} onChange={() => toggleSeleccion(ot.id)} /></td>}
+                          {todasColsOrdenadas.map(col => {
+                            const k = col.key
+                            if (k === 'numero_registro') return <td key="nr" style={{width:36,minWidth:36,padding:'4px 2px',textAlign:'center',fontSize:'0.75rem',fontWeight:'bold',color:'#94a3b8',background:seleccionados.has(ot.id)?'#1e3a5f':'#0d1526',borderRight:'2px solid #1e293b',position:'sticky',left:0,zIndex:1}}>{ot.numero_registro}</td>
+                            if (k === 'numero_ot') return <td key={k} className="font-mono font-semibold text-blue-400">{idPrincipal(ot)}</td>
+                            if (k === 'contratista') return <td key={k}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:ot._cont?.color||'#666'}}/><span className="truncate max-w-32 text-xs">{ot._cont?.nombre||'—'}</span></div></td>
+                            if (k === 'actividad') return <td key={k} className="text-xs">{ot.actividad||'—'}</td>
+                            if (k === 'motivo_ot') return <td key={k}><span className="text-xs bg-gray-800 px-2 py-0.5 rounded">{ot.motivo_ot||'—'}</span></td>
+                            if (k === 'semana') return <td key={k} className="text-xs text-gray-400">{ot.semana||'—'}</td>
+                            if (k === 'contrato') return <td key={k} className="text-xs text-gray-500">{ot._cont?.contrato||'—'}</td>
+                            if (k === 'progreso') return <td key={k}><div className="flex items-center gap-2"><div className="prog-bar"><div className="prog-fill" style={{width:`${pct}%`}}/></div><span className="text-xs font-mono">{pct}%</span></div></td>
+                            if (k === 'fecha_inicio') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_inicio)}</td>
+                            if (k === 'fecha_fin_trabajos') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_fin_trabajos)}</td>
+                            if (k === 'fecha_limite') return <td key={k} className="font-mono text-xs font-semibold">{fmtFecha(ot.fecha_limite_expedientes)}</td>
+                            if (k === 'dias_plazo') return <td key={k} className="text-center font-mono text-xs">{ot.dias_plazo??'—'}</td>
+                            if (k === 'cantidad') return <td key={k} className="text-center text-xs">{ot.cantidad_programada??'—'}</td>
+                            if (k === 'fecha_reporte') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_reporte)}</td>
+                            if (k === 'estado') {
+                              const diasStr = dias === null ? '' : dias < 0 ? ` · ${Math.abs(dias)}d atrás` : ot.estado === 4 ? ` · ${dias}d rest.` : ''
+                              return <td key={k}><span className={`badge ${info.color}`} style={{fontSize:'10px',whiteSpace:'nowrap'}}>{info.label}{diasStr}</span></td>
+                            }
+                            if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
+                            if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
+                            if (k === 'val_pen') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_penalidades_manual||0)>0?'#fbbf24':'#6b7280'}}>{(ot.val_penalidades_manual||0)>0?fmtMoneda(ot.val_penalidades_manual):'—'}</td>
+                            if (k === 'val_total') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_total_penalidad||0)>0?'#ef4444':'#6b7280'}}>{(ot.val_total_penalidad||0)>0?fmtMoneda(ot.val_total_penalidad):'—'}</td>
+                            if (k === 'observaciones') return <td key={k} className="text-xs text-gray-500 max-w-32 truncate">{ot.observaciones||'—'}</td>
+                            if (k === 'eficiencia') return <td key={k} className="text-xs font-mono font-semibold" style={{color:efInfo.color}}>{efInfo.label}</td>
+                            if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<button className="btn-ghost text-xs py-1 px-2" onClick={()=>abrirModalDoc(ot)}>📄</button>:'—'}</td>
+                            if (k.startsWith('extra_')) {
+                              const campo = camposExtra.find(c => `extra_${c.id}` === k)
+                              return <td key={k} className="text-xs text-gray-400">{campo?(ot.datos_extra?.[campo.clave]??'—'):'—'}</td>
+                            }
+                            if (k === 'acciones') {
+                              const docEnColumnaPropia = todasColsOrdenadas.some(c => c.key === 'accion_doc')
+                              return <td key="acc">{!modoEliminar?(<div className="flex gap-1">{tienePlantilla&&!docEnColumnaPropia&&<button className="btn-ghost text-xs py-1 px-2" onClick={()=>abrirModalDoc(ot)}>📄</button>}<button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(ot);setModalOpen(true)}}>✏️</button></div>):(<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ot.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(ot.id)}>{seleccionados.has(ot.id)?'☑':'☐'}</button>)}</td>
+                            }
+                            return null
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'gantt' && <GanttModulo ots={otsFiltradas} contratistas={contratistas} modulo={modulo} />}
+        {tab === 'dashboard' && <DashboardModulo ots={ots} contratistas={contratistas} modulo={modulo} />}
+
+        {/* ── CAMPOS — con preview estilo Excel ── */}
+        {tab === 'campos' && (
+          <div className="max-w-4xl space-y-4">
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-gray-300">Vista previa</span>
+                <span className="text-xs text-gray-600">{camposOrden.length + 2} columnas</span>
+              </div>
+              <div className="overflow-x-auto pb-1">
+                <div className="flex gap-1 items-end flex-nowrap min-w-max">
+                  {[{key:'numero_registro',label:'N° Reg.'},...camposOrden,{key:'acciones',label:'Acciones'}].map((c,i)=>(
+                    <div key={c.key+i} className="flex flex-col items-center gap-1">
+                      <div className="text-xs font-bold px-2 py-0.5 rounded text-center"
+                        style={{background:['numero_registro','acciones'].includes(c.key)?'#1f2937':c.key.startsWith('extra_')?'#3b1f6b':'#1e3a5f',color:['numero_registro','acciones'].includes(c.key)?'#6b7280':c.key.startsWith('extra_')?'#c4b5fd':'#93c5fd',border:'1px solid #2d4a6b',minWidth:28}}>
+                        {colLetra(i)}
+                      </div>
+                      <div className="text-xs text-center px-1.5 py-1 rounded"
+                        style={{background:['numero_registro','acciones'].includes(c.key)?'#111827':c.key.startsWith('extra_')?'#1e1b4b':'#0f172a',color:['numero_registro','acciones'].includes(c.key)?'#4b5563':c.key.startsWith('extra_')?'#a78bfa':'#d1d5db',border:'1px solid #374151',maxWidth:68,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                        title={c.label}>{c.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-4 mt-1.5 text-xs text-gray-600"><span>🔵 Base</span><span>🟣 Personalizada</span><span>⬜ Fija</span></div>
+            </div>
+            <div className="grid grid-cols-5 gap-4">
+              <div className="card col-span-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wide">Orden de columnas</h3>
+                  <button className="btn-primary text-xs" onClick={()=>setModalCampo(true)}>+ Campo personalizado</button>
+                </div>
+                <p className="text-xs text-gray-600 mb-3">↑↓ reordena · ✕ desactiva · 🗑️ elimina personalizada</p>
+                <div className="space-y-1 max-h-96 overflow-y-auto">
+                  {camposOrden.map((col,idx)=>{
+                    const isExtra=col.key.startsWith('extra_')
+                    const isFixed=['estado','fecha_limite'].includes(col.key)
+                    const campo=isExtra?camposExtra.find(c=>`extra_${c.id}`===col.key):null
+                    return (
+                      <div key={col.key+idx} className={`flex items-center gap-2 px-2 py-1.5 rounded border ${isExtra?'border-purple-900 bg-purple-950':'border-blue-900 bg-blue-950'}`}>
+                        <span className="text-xs font-bold w-6 text-center font-mono flex-shrink-0" style={{color:isExtra?'#c4b5fd':'#93c5fd'}}>{colLetra(idx+1)}</span>
+                        <span className={`text-xs flex-1 ${isExtra?'text-purple-200':'text-gray-200'}`}>{col.label}</span>
+                        {isFixed&&<span className="text-xs text-gray-600">fija</span>}
+                        {isExtra&&campo&&<span className="text-xs text-purple-500 bg-purple-900 px-1.5 py-0.5 rounded">{campo.tipo}</span>}
+                        <div className="flex gap-0.5 ml-1">
+                          <button className="text-gray-600 hover:text-gray-200 px-1 text-xs rounded hover:bg-gray-800" onClick={()=>moverEnCampos(idx,-1)} disabled={idx===0}>↑</button>
+                          <button className="text-gray-600 hover:text-gray-200 px-1 text-xs rounded hover:bg-gray-800" onClick={()=>moverEnCampos(idx,1)} disabled={idx===camposOrden.length-1}>↓</button>
+                          {!isFixed&&(isExtra
+                            ?<button className="text-red-600 hover:text-red-400 px-1 text-xs rounded hover:bg-red-950" onClick={()=>campo&&eliminarCampo(campo.id)}>🗑️</button>
+                            :<button className="text-red-600 hover:text-red-400 px-1 text-xs rounded hover:bg-red-950" title="Desactivar" onClick={()=>desactivarColEnCampos(idx)}>✕</button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="card col-span-2">
+                <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wide mb-2">Columnas disponibles</h3>
+                <p className="text-xs text-gray-600 mb-3">Clic para activar al final.</p>
+                <div className="space-y-1 max-h-96 overflow-y-auto">
+                  {CAMPOS_BASE.filter(c=>{
+                    if(c.key==='val_pen'||c.key==='val_total') return modulo.tiene_penalidad
+                    if(c.key==='contratista') return contratistas.length>0
+                    return true
+                  }).filter(c=>!camposOrden.find(a=>a.key===c.key)&&c.key!=='numero_registro').map(col=>(
+                    <button key={col.key} onClick={()=>activarColEnCampos(col.key)}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-gray-800 hover:border-blue-700 hover:bg-blue-950 text-left transition-all">
+                      <span className="text-blue-500 text-xs font-bold">+</span>
+                      <span className="text-xs text-gray-400 flex-1">{col.label}</span>
+                      {col.key==='val_total'&&<span className="text-xs text-yellow-600">💰</span>}
+                      {col.key==='accion_doc'&&<span className="text-xs text-blue-600">📄</span>}
+                    </button>
+                  ))}
+                  {CAMPOS_BASE.filter(c=>{
+                    if(c.key==='val_pen'||c.key==='val_total') return modulo.tiene_penalidad
+                    if(c.key==='contratista') return contratistas.length>0
+                    return true
+                  }).filter(c=>!camposOrden.find(a=>a.key===c.key)&&c.key!=='numero_registro').length===0&&(
+                    <div className="text-xs text-gray-600 py-3 text-center">Todas las columnas están activas</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── MODAL OT ── */}
+      {modalOpen && (
+        <ModalOT modulo={modulo} contratistas={contratistas} camposExtra={camposExtra}
+          actividades={actividades} motivos={motivos} periodo={periodo}
+          ot={editando} colsVisibles={colsVisibles} totalRegistros={ots.length}
+          onClose={() => setModalOpen(false)}
+          onSave={() => { setModalOpen(false); cargar() }} />
+      )}
+
+      {/* ── MODAL NUEVO CAMPO ── */}
+      {modalCampo && (
+        <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)setModalCampo(false)}}>
+          <div className="modal-box" style={{maxWidth:500}}>
+            <div className="modal-header">
+              <h2 className="text-base font-bold text-white">➕ Nueva columna personalizada</h2>
+              <button onClick={()=>setModalCampo(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-400 block mb-1">Nombre de la columna *</label>
+                <input className="input-base" placeholder="Ej: Zona, N° Suministro, Resultado..."
+                  value={nuevoCampo.nombre}
+                  onChange={e=>setNuevoCampo(p=>({...p,nombre:e.target.value,clave:e.target.value.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')}))} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-400 block mb-1">Tipo de dato</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[{v:'texto',icon:'📝',l:'Texto'},{v:'numero',icon:'🔢',l:'Número'},{v:'fecha',icon:'📅',l:'Fecha'},{v:'lista',icon:'📋',l:'Lista'}].map(t=>(
+                    <button key={t.v} type="button" onClick={()=>setNuevoCampo(p=>({...p,tipo:t.v}))}
+                      className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-xs font-medium transition-all ${nuevoCampo.tipo===t.v?'border-blue-500 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:border-gray-600'}`}>
+                      <span className="text-lg">{t.icon}</span>{t.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {nuevoCampo.tipo==='lista'&&(
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Opciones (separadas por coma)</label>
+                  <input className="input-base" placeholder="Ej: Aprobado, Rechazado, Pendiente"
+                    value={nuevoCampo.opciones} onChange={e=>setNuevoCampo(p=>({...p,opciones:e.target.value}))} />
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-semibold text-gray-400 block mb-1">📍 ¿Dónde insertarla?</label>
+                <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-800 rounded-lg p-2 bg-gray-900">
+                  <button type="button"
+                    className={`w-full text-left text-xs px-3 py-1.5 rounded transition-all ${nuevoCampo.insertarEn===-1?'bg-purple-900 text-purple-200 border border-purple-600':'text-gray-400 hover:bg-gray-800'}`}
+                    onClick={()=>setNuevoCampo(p=>({...p,insertarEn:-1}))}>↖ Al inicio (primera columna)</button>
+                  {todasColsOrdenadas.filter(c=>c.key!=='acciones'&&c.key!=='numero_registro').map((col,idx)=>{
+                    const isExtra=col.key.startsWith('extra_')
+                    return (
+                      <button key={col.key} type="button"
+                        className={`w-full text-left text-xs px-3 py-1.5 rounded transition-all flex items-center gap-2 ${nuevoCampo.insertarEn===idx?'bg-purple-900 text-purple-200 border border-purple-600':'text-gray-400 hover:bg-gray-800'}`}
+                        onClick={()=>setNuevoCampo(p=>({...p,insertarEn:idx}))}>
+                        <span className="font-mono font-bold text-xs flex-shrink-0" style={{color:isExtra?'#c4b5fd':'#93c5fd',minWidth:20}}>{colLetra(idx+1)}</span>
+                        <span className="flex-1">{col.label}</span>
+                        {isExtra&&<span className="text-purple-500 text-xs">personalizada</span>}
+                        <span className="text-gray-600 text-xs">→ después</span>
+                      </button>
+                    )
+                  })}
+                  <button type="button"
+                    className={`w-full text-left text-xs px-3 py-1.5 rounded transition-all ${nuevoCampo.insertarEn===-2?'bg-purple-900 text-purple-200 border border-purple-600':'text-gray-400 hover:bg-gray-800'}`}
+                    onClick={()=>setNuevoCampo(p=>({...p,insertarEn:-2}))}>↘ Al final</button>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">
+                  {nuevoCampo.insertarEn===-1?'→ Primera posición':nuevoCampo.insertarEn===-2?'→ Al final':`→ Después de "${todasColsOrdenadas.filter(c=>c.key!=='acciones'&&c.key!=='numero_registro')[nuevoCampo.insertarEn]?.label||''}"`}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="accent-blue-500" checked={nuevoCampo.obligatorio}
+                  onChange={e=>setNuevoCampo(p=>({...p,obligatorio:e.target.checked}))} />
+                <span className="text-xs text-gray-300">Campo obligatorio al crear un registro</span>
+              </label>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={()=>setModalCampo(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={guardarCampo} disabled={!nuevoCampo.nombre}>💾 Agregar columna</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalDoc && otParaDoc && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModalDoc(false) }}>
+          <div className="modal-box" style={{ maxWidth: 700 }}>
+            <div className="modal-header">
+              <h2 className="text-base font-bold text-white">📄 Generar Documento — {esOT ? `OT #${idPrincipal(otParaDoc)}` : `Reg. #${otParaDoc.numero_registro}`}</h2>
+              <button onClick={() => setModalDoc(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
+            </div>
+            <div className="p-6" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+              <p className="text-xs text-gray-400 mb-4">Todos los campos son editables. Los valores están precargados desde el registro.</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Título del documento</label>
+                  <input className="input-base" value={docForm.titulo || ''} onChange={e => setDocForm(p => ({ ...p, titulo: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">N° OT</label>
+                  <input className="input-base" value={docForm.numero_ot || ''} onChange={e => setDocForm(p => ({ ...p, numero_ot: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT (EPUxxIPxx)</label>
+                  <input className="input-base" value={docForm.codigo_ot || ''} onChange={e => setDocForm(p => ({ ...p, codigo_ot: e.target.value }))} placeholder="EPU16IP26" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Contrato</label>
+                  <input className="input-base" value={docForm.contrato || ''} onChange={e => setDocForm(p => ({ ...p, contrato: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Semana</label>
+                  <input className="input-base" value={docForm.semana || ''} onChange={e => setDocForm(p => ({ ...p, semana: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio trabajo</label>
+                  <input className="input-base" type="date" value={docForm.fecha_inicio || ''} onChange={e => setDocForm(p => ({ ...p, fecha_inicio: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha final trabajo</label>
+                  <input className="input-base" type="date" value={docForm.fecha_fin || ''} onChange={e => setDocForm(p => ({ ...p, fecha_fin: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite expedientes</label>
+                  <input className="input-base" type="date" value={docForm.fecha_limite || ''} onChange={e => setDocForm(p => ({ ...p, fecha_limite: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">📅 Fecha entrega OT</label>
+                  <input className="input-base" type="date" value={docForm.fecha_entrega || ''} onChange={e => setDocForm(p => ({ ...p, fecha_entrega: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Plazo (días)</label>
+                  <input className="input-base" type="number" value={docForm.dias_plazo || ''} onChange={e => setDocForm(p => ({ ...p, dias_plazo: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Cantidad</label>
+                  <input className="input-base" type="number" value={docForm.cantidad || ''} onChange={e => setDocForm(p => ({ ...p, cantidad: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label>
+                  <input className="input-base" value={docForm.cumplimiento || ''} onChange={e => setDocForm(p => ({ ...p, cumplimiento: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad (en doc.)</label>
+                  <input className="input-base" value={docForm.actividad_label || ''} onChange={e => setDocForm(p => ({ ...p, actividad_label: e.target.value, actividad_doc: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label>
+                  <input className="input-base" value={docForm.editado_por || ''} onChange={e => setDocForm(p => ({ ...p, editado_por: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Coordinador (firma 1)</label>
+                  <input className="input-base" value={docForm.coordinador || ''} onChange={e => setDocForm(p => ({ ...p, coordinador: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Área usuaria (firma 2)</label>
+                  <input className="input-base" value={docForm.area_usuaria || ''} onChange={e => setDocForm(p => ({ ...p, area_usuaria: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Contratista (firma 3)</label>
+                  <input className="input-base" value={docForm.contratista_nombre || ''} onChange={e => setDocForm(p => ({ ...p, contratista_nombre: e.target.value }))} />
+                </div>
+              </div>
+              {/* Versión de firmas */}
+              <div className="mt-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
+                <div className="text-xs font-semibold text-gray-300 mb-2">✍️ Versión de firmas</div>
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { v: 'espacios',   l: 'Con espacio para firmar', desc: 'Área en blanco para firmar a mano o añadir imagen' },
+                    { v: 'firmado',    l: 'Con firmas reales', desc: 'Cuando subas el Word firmado, se insertarán aquí' },
+                  ].map(({ v, l, desc }) => (
+                    <label key={v} className={`flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer flex-1 min-w-36 transition-all ${versionFirma === v ? 'border-blue-600 bg-blue-950' : 'border-gray-800 hover:border-gray-700'}`}>
+                      <input type="radio" className="accent-blue-500 mt-0.5" checked={versionFirma === v} onChange={() => setVersionFirma(v)} />
+                      <div>
+                        <div className={`text-xs font-semibold ${versionFirma === v ? 'text-blue-300' : 'text-gray-400'}`}>{l}</div>
+                        <div className="text-xs text-gray-600 mt-0.5">{desc}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setModalDoc(false)}>Cancelar</button>
+              <button className="btn-ghost" onClick={() => (async () => {
+                    try {
+                      const data = {
+                        numero_ot: String(docForm.numero_ot||''), codigo_ot: String(docForm.codigo_ot||docForm.numero_ot||''),
+                        contrato: String(docForm.contrato||''), fecha_entrega: docForm.fecha_entrega||'',
+                        fecha_inicio: docForm.fecha_inicio||'', fecha_fin: docForm.fecha_fin||'',
+                        fecha_limite: docForm.fecha_limite||'', dias_plazo: String(docForm.dias_plazo||'1'),
+                        cantidad: String(docForm.cantidad||''), actividad_doc: String(docForm.actividad_doc||docForm.actividad_label||''),
+                        actividad_label: String(docForm.actividad_label||''), cumplimiento: String(docForm.cumplimiento||''),
+                        editado_por: String(docForm.editado_por||''), coordinador: String(docForm.coordinador||''),
+                        contratista_nombre: String(docForm.contratista_nombre||''), motivo_extra: String(docForm.motivo_extra||''),
+                      }
+                      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ actividad: otParaDoc.actividad, data }) })
+                      if (!res.ok) { alert('Error al generar Word'); return }
+                      const blob = await res.blob()
+                      const url = URL.createObjectURL(blob)
+                      window.open(url, '_blank')
+                      setTimeout(() => URL.revokeObjectURL(url), 10000)
+                    } catch(e) { alert('Error: ' + e.message) }
+                  })()}>📝 Word (.docx)</button>
+              <button className="btn-primary" onClick={async () => {
+                try {
+                  const data = { ...docForm, titulo: docForm.titulo || otParaDoc.actividad }
+                  const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actividad: otParaDoc.actividad, data }) })
+                  if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+                  const arrayBuffer = await res.arrayBuffer()
+                  const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = 'OT_' + (docForm.codigo_ot || docForm.numero_ot) + '_' + otParaDoc.actividad + '.pdf'
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  setTimeout(() => URL.revokeObjectURL(url), 2000)
+                  setModalDoc(false)
+                } catch(e) { alert('Error: ' + e.message) }
+              }}>📥 Descargar PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL GENERAR POR BLOQUE — con tabla editable ── */}
+      {modalTodas && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModalTodas(false) }}>
+          <div className="modal-box" style={{ maxWidth: 900 }}>
+            <div className="modal-header">
+              <h2 className="text-base font-bold text-white">🖨️ Generar por bloque</h2>
+              <button onClick={() => setModalTodas(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
+            </div>
+            <div className="p-4">
+              {/* Opciones */}
+              <div className="flex flex-wrap gap-4 mb-4 items-center">
+                <div className="flex gap-3">
+                  {[{ v: 'pdf', l: '🖨️ PDF' }, { v: 'word', l: '📝 Word' }].map(({ v, l }) => (
+                    <label key={v} className="flex items-center gap-2 cursor-pointer">
+                      <input type="radio" className="accent-blue-500" checked={tipoLote === v} onChange={() => setTipoLote(v)} />
+                      <span className="text-sm text-gray-200">{l}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-3 ml-4 items-center">
+                  {[{v:'espacios',l:'✏️ Espacio para firmar'},{v:'firmado',l:'✍️ Con firmas reales'}].map(({v,l})=>(
+                    <label key={v} className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" className="accent-blue-500" checked={versionFirma===v} onChange={()=>setVersionFirma(v)} />
+                      <span className="text-xs text-gray-200">{l}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="ml-auto flex gap-2">
+                  <button className="btn-ghost text-xs py-1 px-2" onClick={() => setLoteEditando(p => p.map(x => ({ ...x, _sel: true })))}>✅ Todas</button>
+                  <button className="btn-ghost text-xs py-1 px-2" onClick={() => setLoteEditando(p => p.map(x => ({ ...x, _sel: false })))}>☐ Ninguna</button>
+                </div>
+              </div>
+
+              {/* Tabla editable — mismos campos que el modal individual */}
+              <div className="rounded-lg border border-gray-800 overflow-auto" style={{ maxHeight: '52vh' }}>
+                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 5 }}>
+                    <tr>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800 w-8">✓</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800">Reg.</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:180}}>Título del documento</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:80}}>N° OT</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:100}}>Código OT</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Contrato</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:90}}>Semana</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Entrega OT</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Inicio</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Final</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Límite</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:60}}>Plazo</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:70}}>Cantidad</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Cumplimiento</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Actividad (doc.)</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Editado por</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Coordinador (f.1)</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Área usuaria (f.2)</th>
+                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Contratista (f.3)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loteEditando.map((row, i) => (
+                      <tr key={row._id} className={`border-b border-gray-800 ${row._sel ? '' : 'opacity-40'}`}>
+                        <td className="px-2 py-1"><input type="checkbox" className="accent-blue-500" checked={row._sel} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,_sel:e.target.checked}:x))} /></td>
+                        <td className="px-2 py-1 text-gray-300 font-mono">{esOT ? row.numero_ot : row.numero_registro}</td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.titulo||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,titulo:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.numero_ot||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,numero_ot:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.codigo_ot||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,codigo_ot:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.contrato||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,contrato:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.semana||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,semana:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_entrega||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_entrega:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_inicio||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_inicio:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_fin||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_fin:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_limite||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_limite:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="number" value={row.dias_plazo||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,dias_plazo:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="number" value={row.cantidad||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,cantidad:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.cumplimiento||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,cumplimiento:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.actividad_label||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,actividad_label:e.target.value,actividad_doc:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.editado_por||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,editado_por:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.coordinador||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,coordinador:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.area_usuaria||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,area_usuaria:e.target.value}:x))} /></td>
+                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.contratista_nombre||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,contratista_nombre:e.target.value}:x))} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+                            <div className="mt-2 text-xs text-gray-500">{loteEditando.filter(x => x._sel).length} de {loteEditando.length} seleccionados</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setModalTodas(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={() => {
+                const seleccionadas = loteEditando.filter(x => x._sel)
+                if (seleccionadas.length === 0) { alert('Selecciona al menos un registro.'); return }
+                setModalTodas(false)
+                const actividadesLote = seleccionadas.map(f => f._actividad)
+                if (tipoLote === 'word') {
+                  seleccionadas.forEach((f, idx) => setTimeout(() => descargarWordTemplate(f, actividadesLote[idx]), idx * 800))
+                } else {
+                  window.open(URL.createObjectURL(new Blob([generarHTMLLoteConAPI(seleccionadas, actividadesLote)], { type: 'text/html' })), '_blank')
+                }
+              }}>Generar {loteEditando.filter(x => x._sel).length} documento(s)</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SortTh — columna ordenable ────────────────────────────────────────────────
+function SortTh({ k, label, sc, ts }) {
+  const active = sc.key === k
+  return (
+    <th onClick={() => ts(k)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+      {label}
+      <span className="ml-1 text-xs" style={{ color: active ? '#60a5fa' : '#4b5563' }}>
+        {active ? (sc.dir === 'asc' ? '↑' : '↓') : '↕'}
+      </span>
+    </th>
+  )
+}
+
+// ── ColumnInsertStrip — selector visual de posición ────────────────────────────
+function ColumnInsertStrip({ camposBase, isColVisible, camposExtra, orden, setOrden, nombre }) {
+  const baseActivas = camposBase.filter(c => isColVisible(c.key))
+  const extrasOrden = [...camposExtra].sort((a, b) => a.orden - b.orden)
+  const totalCols = baseActivas.length + extrasOrden.length
+  const insertPos = orden
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="flex gap-0.5 items-center flex-nowrap p-2 bg-gray-900 rounded border border-gray-800 min-w-max">
+        <button type="button" onClick={() => setOrden(0)}
+          className={"flex-shrink-0 text-xs px-1.5 py-1.5 rounded border transition-all " + (insertPos === 0 ? 'border-purple-500 bg-purple-950 text-purple-300 font-bold' : 'border-dashed border-gray-700 text-gray-600 hover:border-purple-600')}>+</button>
+
+        {baseActivas.map((col, i) => (
+          <div key={"base_" + col.key} className="flex items-center gap-0.5 flex-shrink-0">
+            <div className="text-xs px-2 py-1.5 rounded" style={{ background: '#0f172a', border: '1px solid #374151', color: '#94a3b8' }}>
+              <div className="text-blue-400 font-mono text-xs font-bold text-center">{colLetra(i)}</div>
+              <div style={{ maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '9px' }}>{col.label}</div>
+            </div>
+            <button type="button" onClick={() => setOrden(i + 1)}
+              className={"flex-shrink-0 text-xs px-1.5 py-1.5 rounded border transition-all " + (insertPos === i + 1 ? 'border-purple-500 bg-purple-950 text-purple-300 font-bold' : 'border-dashed border-gray-700 text-gray-600 hover:border-purple-600')}>+</button>
+          </div>
+        ))}
+
+        {extrasOrden.map((c, i) => {
+          const insertAfterThis = baseActivas.length + i + 1
+          return (
+            <div key={"extra_" + c.id} className="flex items-center gap-0.5 flex-shrink-0">
+              <div className="text-xs px-2 py-1.5 rounded" style={{ background: '#1e1b4b', border: '1px solid #4c1d95', color: '#a5b4fc' }}>
+                <div className="font-mono text-xs font-bold text-center text-purple-400">{colLetra(baseActivas.length + i)}</div>
+                <div style={{ maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '9px' }}>{c.nombre}</div>
+              </div>
+              <button type="button" onClick={() => setOrden(insertAfterThis)}
+                className={"flex-shrink-0 text-xs px-1.5 py-1.5 rounded border transition-all " + (insertPos === insertAfterThis ? 'border-purple-500 bg-purple-950 text-purple-300 font-bold' : 'border-dashed border-gray-700 text-gray-600 hover:border-purple-600')}>+</button>
+            </div>
+          )
+        })}
+
+        {insertPos === totalCols && (
+          <div className="flex-shrink-0 text-xs px-2 py-1.5 rounded font-semibold" style={{ background: '#4c1d95', border: '1px dashed #7c3aed', color: '#e9d5ff' }}>
+            <div className="font-mono text-xs font-bold text-center text-purple-200">{colLetra(totalCols)}</div>
+            <div style={{ maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '9px' }}>{nombre || '(nueva)'}</div>
+          </div>
+        )}
+      </div>
+      {insertPos < totalCols && (
+        <div className="mt-1 text-xs text-purple-400">
+          Posición <strong>{colLetra(insertPos)}</strong> entre{' '}
+          <strong>{insertPos > 0 ? (insertPos <= baseActivas.length ? (baseActivas[insertPos - 1] ? baseActivas[insertPos - 1].label : '?') : (extrasOrden[insertPos - baseActivas.length - 1] ? extrasOrden[insertPos - baseActivas.length - 1].nombre : '?')) : 'inicio'}</strong>
+          {' '}y{' '}
+          <strong>{insertPos < baseActivas.length ? (baseActivas[insertPos] ? baseActivas[insertPos].label : '?') : (extrasOrden[insertPos - baseActivas.length] ? extrasOrden[insertPos - baseActivas.length].nombre : 'final')}</strong>
+        </div>
+      )}
+      <p className="text-xs text-gray-500 mt-1">Azul = columna base · Morado = personalizada</p>
+    </div>
+  )
+}
+
+// ── diasColor / diasLabel ─────────────────────────────────────────────────────
+function diasColor(dias) {
+  if (dias === null || dias === undefined) return '#6b7280'
+  if (dias < 0) return '#ef4444'
+  if (dias <= 3) return '#eab308'
+  return '#6b7280'
+}
+function diasLabel(dias) {
+  if (dias === null || dias === undefined) return ''
+  if (dias < 0) return Math.abs(dias) + 'd atrás'
+  return dias + 'd rest.'
+}
+
+// ── DashboardModulo ───────────────────────────────────────────────────────────
+function Donut({ segs, size = 110, grosor = 22 }) {
+  const r = (size - grosor) / 2, circ = 2 * Math.PI * r
+  const cx = size / 2, cy = size / 2
+  const total = segs.reduce((s, x) => s + x.n, 0)
+  if (!total) return (
+    <svg width={size} height={size}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1f2937" strokeWidth={grosor}/>
+      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fill="#4b5563" fontSize={9}>Sin datos</text>
+    </svg>
+  )
+  let off = 0
+  const arcos = segs.filter(s => s.n > 0).map(s => {
+    const pct = s.n / total, dash = pct * circ
+    const el = { ...s, dash, gap: circ - dash, offset: off * circ }
+    off += pct; return el
+  })
+  return (
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1f2937" strokeWidth={grosor}/>
+      {arcos.map((a, i) => (
+        <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={a.color} strokeWidth={grosor}
+          strokeDasharray={`${a.dash} ${a.gap}`} strokeDashoffset={-a.offset} strokeLinecap="butt"/>
+      ))}
+    </svg>
+  )
+}
+
+function BarH({ segs, total, h = 6 }) {
+  if (!total) return <div style={{ height: h, background: '#1f2937', borderRadius: h/2 }}/>
+  return (
+    <div style={{ height: h, background: '#1f2937', borderRadius: h/2, overflow: 'hidden', display: 'flex' }}>
+      {segs.filter(s => s.n > 0).map((s, i) => (
+        <div key={i} style={{ width: `${s.n/total*100}%`, background: s.color }} title={`${s.label||''}: ${s.n}`}/>
+      ))}
+    </div>
+  )
+}
+
+const C5 = { 1:'#22c55e', 2:'#f97316', 3:'#3b82f6', 4:'#eab308', 5:'#ef4444' }
+
+function DashboardModulo({ ots, contratistas, modulo }) {
+  if (ots.length === 0) return (
+    <div className="flex items-center justify-center py-16 text-gray-600">
+      <div className="text-center">
+        <div className="text-3xl mb-2">📊</div>
+        <div className="text-sm">Sin registros para mostrar estadísticas</div>
+      </div>
+    </div>
+  )
+
+  const esOT = modulo?.tipo === 'ot'
+  const total = ots.length
+  const mk = fn => ots.filter(fn).length
+
+  const stats = {
+    total,
+    cumplidos:  mk(o => o.estado === 1 || o.estado === 2),
+    a_tiempo:   mk(o => o.estado === 1),
+    tarde:      mk(o => o.estado === 2),
+    en_proceso: mk(o => o.estado === 3),
+    por_vencer: mk(o => o.estado === 4),
+    fuera:      mk(o => o.estado === 5),
+    pen_total:  ots.reduce((s, o) => s + (o.val_total_penalidad || 0), 0),
+    con_reporte: mk(o => !!o.fecha_reporte),
+    sin_reporte: mk(o => !o.fecha_reporte),
+  }
+  const pct = total > 0 ? Math.round(stats.cumplidos / total * 100) : 0
+  const pctATiempo = total > 0 ? Math.round(stats.a_tiempo / total * 100) : 0
+
+  const segEstados = [
+    { n: stats.a_tiempo,   color: C5[1], label: 'A tiempo'   },
+    { n: stats.tarde,      color: C5[2], label: 'Tarde'      },
+    { n: stats.en_proceso, color: C5[3], label: 'En proceso' },
+    { n: stats.por_vencer, color: C5[4], label: 'Por vencer' },
+    { n: stats.fuera,      color: C5[5], label: 'Fuera'      },
+  ]
+
+  // Por semana
+  const xSemana = {}
+  ots.forEach(o => {
+    if (!o.semana) return
+    if (!xSemana[o.semana]) xSemana[o.semana] = { total:0, a_tiempo:0, tarde:0, en_proceso:0, por_vencer:0, fuera:0 }
+    xSemana[o.semana].total++
+    if (o.estado===1) xSemana[o.semana].a_tiempo++
+    if (o.estado===2) xSemana[o.semana].tarde++
+    if (o.estado===3) xSemana[o.semana].en_proceso++
+    if (o.estado===4) xSemana[o.semana].por_vencer++
+    if (o.estado===5) xSemana[o.semana].fuera++
+  })
+  const semanas = Object.entries(xSemana).sort(([a],[b]) => a.localeCompare(b))
+  const maxSem = Math.max(...semanas.map(([,v]) => v.total), 1)
+
+  // Por contratista (solo módulos OT)
+  const xCont = esOT ? contratistas.map(c => {
+    const mis = ots.filter(o => o.contratista_id === c.id)
+    return {
+      ...c, total: mis.length,
+      cumplidos:  mis.filter(o => o.estado===1||o.estado===2).length,
+      en_proceso: mis.filter(o => o.estado===3||o.estado===4).length,
+      fuera:      mis.filter(o => o.estado===5).length,
+      pen:        mis.reduce((s,o) => s+(o.val_total_penalidad||0), 0),
+    }
+  }).filter(c => c.total > 0).sort((a,b) => b.total-a.total) : []
+
+  // Eficiencia promedio (solo si tienen fecha_reporte)
+  const conEfic = ots.filter(o => o.eficiencia !== null && o.eficiencia !== undefined)
+  const eficProm = conEfic.length > 0 ? Math.round(conEfic.reduce((s,o) => s+(o.eficiencia||0),0)/conEfic.length) : null
+  const eficInfo = eficProm !== null
+    ? eficProm >= 90 ? { label:'Excelente', color:'#22c55e', grade:'A' }
+    : eficProm >= 75 ? { label:'Bueno',     color:'#84cc16', grade:'B' }
+    : eficProm >= 60 ? { label:'Regular',   color:'#eab308', grade:'C' }
+    : eficProm >= 40 ? { label:'Deficiente',color:'#f97316', grade:'D' }
+    : { label:'Crítico', color:'#ef4444', grade:'F' }
+    : null
+
+  return (
+    <div className="space-y-4">
+
+      {/* KPIs */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px,1fr))' }}>
+        {[
+          { label: 'Total',        value: total,            color: '#3b82f6', icon: '📋', sub: `${stats.con_reporte} con reporte` },
+          { label: 'Cumplieron',   value: stats.cumplidos,  color: '#22c55e', icon: '✅', sub: `${stats.a_tiempo} a tiempo · ${stats.tarde} tarde`, pct },
+          { label: 'En proceso',   value: stats.en_proceso, color: '#3b82f6', icon: '●',  sub: 'dentro del plazo' },
+          { label: 'Por vencer',   value: stats.por_vencer, color: '#eab308', icon: '⚡', sub: '≤ días configurados' },
+          { label: 'Fuera de plazo',value: stats.fuera,     color: '#ef4444', icon: '❌', sub: 'sin reporte' },
+          ...(esOT && stats.pen_total > 0 ? [{ label: 'Penalidades', value: `S/ ${stats.pen_total.toFixed(2)}`, color:'#f43f5e', icon:'💰', sub:'total acumulado', small:true }] : []),
+          ...(eficInfo ? [{ label:'Eficiencia prom.', value:`${eficProm}`, color: eficInfo.color, icon:'📈', sub: eficInfo.label, small:true }] : []),
+        ].map((k,i) => (
+          <div key={i} className="card" style={{ borderTop:`2px solid ${k.color}`, padding:'12px 14px' }}>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-sm">{k.icon}</span>
+              <span className="text-xs text-gray-500 font-medium leading-tight">{k.label}</span>
+            </div>
+            <div className={`font-bold font-mono leading-none ${k.small ? 'text-sm' : 'text-2xl'}`} style={{ color: k.color }}>
+              {k.value}
+            </div>
+            {k.pct !== undefined && (
+              <div className="mt-1.5">
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="text-gray-700">cumplimiento</span>
+                  <span className="font-mono font-bold" style={{ color: k.color }}>{k.pct}%</span>
+                </div>
+                <div style={{ height:3, background:'#1f2937', borderRadius:2, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${k.pct}%`, background:k.color }}/>
+                </div>
+              </div>
+            )}
+            <div className="text-xs text-gray-700 mt-1 leading-tight">{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Donut + Semanas */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: '260px 1fr' }}>
+
+        {/* Donut */}
+        <div className="card" style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">🍩 Distribución</div>
+          <div className="flex items-center gap-4">
+            <div className="relative flex-shrink-0">
+              <Donut segs={segEstados} size={110} grosor={22}/>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div className="text-xl font-bold font-mono text-white leading-none">{pct}%</div>
+                <div className="text-xs text-gray-500">cumplidos</div>
+              </div>
+            </div>
+            <div className="space-y-1.5 flex-1 min-w-0">
+              {segEstados.map(s => (
+                <div key={s.label} className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background:s.color }}/>
+                  <span className="text-xs text-gray-400 flex-1 truncate">{s.label}</span>
+                  <span className="text-xs font-mono font-bold flex-shrink-0" style={{ color:s.color }}>{s.n}</span>
+                  {total > 0 && <span className="text-xs text-gray-700 flex-shrink-0" style={{ minWidth:28, textAlign:'right' }}>{Math.round(s.n/total*100)}%</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-700 mb-1">Distribución acumulada</div>
+            <BarH segs={segEstados} total={total} h={7}/>
+          </div>
+        </div>
+
+        {/* Por semana */}
+        <div className="card">
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">📅 Por semana</div>
+          {semanas.length === 0 ? (
+            <div className="text-center py-6 text-gray-600 text-xs">Sin datos por semana</div>
+          ) : (
+            <>
+              <div className="flex gap-3 mb-2 flex-wrap">
+                {[['A tiempo',C5[1]],['Tarde',C5[2]],['En proceso',C5[3]],['Por vencer',C5[4]],['Fuera',C5[5]]].map(([l,c]) => (
+                  <div key={l} className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-sm" style={{ background:c }}/>
+                    <span className="text-xs text-gray-600">{l}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {semanas.map(([sem,d]) => (
+                  <div key={sem} className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 flex-shrink-0 font-mono" style={{ width:76, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sem}</span>
+                    <div className="flex-1">
+                      <BarH segs={[
+                        { n: d.a_tiempo   * (d.total/maxSem), color:C5[1] },
+                        { n: d.tarde      * (d.total/maxSem), color:C5[2] },
+                        { n: d.en_proceso * (d.total/maxSem), color:C5[3] },
+                        { n: d.por_vencer * (d.total/maxSem), color:C5[4] },
+                        { n: d.fuera      * (d.total/maxSem), color:C5[5] },
+                      ]} total={d.total} h={18}/>
+                    </div>
+                    <span className="text-xs font-mono text-gray-500 flex-shrink-0" style={{ width:20, textAlign:'right' }}>{d.total}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Por contratista (solo OT) / Resumen de campos extra (libre) */}
+      {esOT && xCont.length > 0 && (
+        <div className="card">
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">🏢 Por contratista</div>
+          <div className="space-y-3">
+            {xCont.map(c => {
+              const pctC = c.total > 0 ? Math.round(c.cumplidos/c.total*100) : 0
+              return (
+                <div key={c.id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background:c.color||'#6b7280' }}/>
+                      <span className="text-xs text-gray-300 truncate max-w-48">{c.nombre}</span>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {c.pen > 0 && <span className="text-xs text-red-400 font-mono">S/{c.pen.toFixed(2)}</span>}
+                      {c.fuera > 0 && <span className="text-xs font-mono" style={{ color:C5[5] }}>{c.fuera} fuera</span>}
+                      <span className="text-xs font-mono font-bold" style={{ color: pctC>=80?C5[1]:pctC>=50?C5[4]:C5[5] }}>{pctC}%</span>
+                    </div>
+                  </div>
+                  <BarH segs={[
+                    { n:c.cumplidos,  color:'#22c55e', label:'Cumplidos'  },
+                    { n:c.en_proceso, color:'#3b82f6', label:'En proceso' },
+                    { n:c.fuera,      color:C5[5],     label:'Fuera'      },
+                  ]} total={c.total} h={5}/>
+                  <div className="text-xs text-gray-600 mt-0.5">{c.total} registros</div>
+                </div>
+              )
+            })}
+            {modulo.tiene_penalidad && stats.pen_total > 0 && (
+              <div className="pt-3 border-t border-gray-800 flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-400">Total penalidades acumuladas</span>
+                <span className="text-lg font-bold font-mono text-red-400">S/ {stats.pen_total.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Módulo libre — resumen simple */}
+      {!esOT && (
+        <div className="card">
+          <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">📋 Resumen de registros</div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label:'Con reporte',   value:stats.con_reporte,  color:'#22c55e', pct: total>0?Math.round(stats.con_reporte/total*100):0 },
+              { label:'Sin reporte',   value:stats.sin_reporte,  color:'#6b7280', pct: total>0?Math.round(stats.sin_reporte/total*100):0 },
+              { label:'Fuera de plazo',value:stats.fuera,         color:'#ef4444', pct: total>0?Math.round(stats.fuera/total*100):0 },
+            ].map((r,i) => (
+              <div key={i} className="p-3 rounded-xl border border-gray-800" style={{ background:'#0d1526' }}>
+                <div className="text-2xl font-bold font-mono leading-none" style={{ color:r.color }}>{r.value}</div>
+                <div className="text-xs text-gray-500 mt-1">{r.label}</div>
+                <div className="mt-2" style={{ height:3, background:'#1f2937', borderRadius:2 }}>
+                  <div style={{ height:'100%', width:`${r.pct}%`, background:r.color, borderRadius:2 }}/>
+                </div>
+                <div className="text-xs text-gray-700 mt-0.5">{r.pct}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+    </div>
+  )
+}
