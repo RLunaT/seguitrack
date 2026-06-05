@@ -264,7 +264,7 @@ export default function NotificacionesPage() {
         <summary className="text-xs font-semibold text-gray-400 select-none">💬 ¿Cómo obtener la CallMeBot Key? (clic para ver)</summary>
         <div className="mt-3 grid grid-cols-2 gap-4 text-xs text-gray-400">
           <div className="space-y-2">
-            <div><span className="text-green-400 font-bold">1.</span> Desde tu WhatsApp, envía este mensaje al <span className="text-green-300 font-mono">+34 611 04 87 48</span>:</div>
+            <div><span className="text-green-400 font-bold">1.</span> Desde tu WhatsApp, envía este mensaje al <span className="text-green-300 font-mono">+34 644 66 32 62</span>:</div>
             <div className="bg-gray-900 rounded p-2 font-mono text-gray-200 border border-gray-700 select-all">I allow callmebot to send me messages</div>
             <div><span className="text-green-400 font-bold">2.</span> Recibes tu key personal en segundos.</div>
             <div><span className="text-green-400 font-bold">3.</span> Úsala al agregar tu configuración aquí.</div>
@@ -399,7 +399,7 @@ export default function NotificacionesPage() {
                   <span className="text-gray-600 font-normal ml-1">— solo tú la ves</span>
                 </label>
                 <input className="input-base font-mono" placeholder="Ej: 7260729" value={form.callmebot_key} onChange={e => setForm(p => ({ ...p, callmebot_key: e.target.value }))} />
-                <p className="text-xs text-gray-600 mt-1">Envía <span className="font-mono text-green-400">I allow callmebot to send me messages</span> al <span className="font-mono text-green-400">+34 611 04 87 48</span></p>
+                <p className="text-xs text-gray-600 mt-1">Envía <span className="font-mono text-green-400">I allow callmebot to send me messages</span> al <span className="font-mono text-green-400">+34 644 66 32 62</span></p>
               </div>
 
               {/* PIN */}
