@@ -23,13 +23,13 @@ body {
 
 /* Tabla */
 .tabla-base {
-  width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
 }
 .tabla-base th {
   background: #1f2937;
-  padding: 10px 12px;
+  padding: 8px 10px;
   text-align: left;
   font-size: 10px;
   font-weight: 700;
@@ -38,14 +38,55 @@ body {
   color: #9ca3af;
   border-bottom: 1px solid #374151;
   white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+  text-overflow: clip;
 }
 .tabla-base td {
-  padding: 9px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid #1f2937;
   vertical-align: middle;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 0;
 }
 .tabla-base tbody tr:hover td {
   background: #1f2937;
+}
+.col-resize-handle {
+  position: absolute !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 5px !important;
+  cursor: col-resize !important;
+  z-index: 20;
+  background: #4b5563;
+  display: block !important;
+}
+.col-resize-handle:hover {
+  background: #3b82f6 !important;
+}
+/* Handle de redimensionado */
+.col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 10;
+  background: #374151;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+}
+.col-resize-handle:hover,
+.col-resize-handle.resizing {
+  background: #3b82f6;
+  opacity: 1;
+  width: 4px;
 }
 
 /* Badge estados — 5 estados */

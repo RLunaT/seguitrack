@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
@@ -28,8 +28,9 @@ const CAMPOS_BASE = [
   { key: 'fecha_fin_trabajos', label: 'F. Fin',          always: false },
   { key: 'fecha_limite',       label: 'F. Límite',       always: true  },
   { key: 'dias_plazo',         label: 'Días Plazo',      always: false },
-  { key: 'cantidad',           label: 'Cant.',           always: false },
+  { key: 'cantidad',           label: 'Cant. Prog.',     always: false },
   { key: 'fecha_reporte',      label: 'F. Reporte',      always: false },
+  { key: 'cantidad_entregada', label: 'Cant. Entregada', always: false },
   { key: 'estado',             label: 'Estado',          always: true  },
   { key: 'duracion_real',      label: 'Dur. Real',       always: false },
   { key: 'dias_fuera',         label: 'D. Fuera',        always: false },
@@ -51,6 +52,8 @@ export default function ModuloPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editando, setEditando] = useState(null)
+  const [modalSeg, setModalSeg]   = useState(false)
+  const [otSeg, setOtSeg]         = useState(null)
   const [buscar, setBuscar] = useState('')
   const [filtContratista, setFiltContratista] = useState('')
   const [filtEstado, setFiltEstado] = useState('')
@@ -91,14 +94,17 @@ export default function ModuloPage() {
     const [{ data: mod }, { data: otsData }, { data: conts }, { data: campos }, { data: cfg }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
       supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
-      supabase.from('contratistas').select('*').eq('activo', true).order('nombre'),
+      supabase.from('contratistas').select('*, contratista_modulos!inner(modulo_id, orden)').eq('contratista_modulos.modulo_id', parseInt(id)).eq('activo', true),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
     ])
     const p = cfg?.find(c => c.clave === 'periodo')?.valor || '2026-I'
     setPeriodo(p)
     setModulo(mod)
-    setContratistas(conts || [])
+    const contsOrdenados = (conts || []).map(c => ({
+      ...c, _orden: c.contratista_modulos?.[0]?.orden ?? 99
+    })).sort((a, b) => a._orden - b._orden)
+    setContratistas(contsOrdenados)
     setCamposExtra(campos || [])
     // numero_registro is always the positional row number within this module
     // Sort by id (insertion order) to get consistent numbering
@@ -108,7 +114,7 @@ export default function ModuloPage() {
       return {
         ...ot,
         numero_registro: String(idx + 1),  // always positional, never from DB
-        ...calcularCamposConEficiencia(ot, cont, p),
+        ...calcularCamposConEficiencia(ot, cont, p, parseInt(id)),
         _cont: cont
       }
     })
@@ -143,6 +149,77 @@ export default function ModuloPage() {
     return esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
   }
   function labelId() { return esOT ? 'N° OT' : 'N° Registro' }
+
+  // ── Ancho de columnas (redimensionado) ───────────────────────
+  const [colWidths, setColWidths] = useState(() => {
+    if (typeof window === 'undefined') return {}
+    try { return JSON.parse(localStorage.getItem(`col_widths_${id}`) || '{}') } catch { return {} }
+  })
+  const resizingRef = useRef(null)
+
+  function startResize(e, colKey, currentWidth) {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startW = currentWidth || 120
+    const th = e.target.closest('th')
+    resizingRef.current = { colKey, startX, startW }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(ev) {
+      if (!resizingRef.current) return
+      const delta = ev.clientX - resizingRef.current.startX
+      const newW  = Math.max(60, resizingRef.current.startW + delta)
+      resizingRef.current.currentW = newW
+      if (th) { th.style.width = newW + 'px'; th.style.minWidth = newW + 'px' }
+    }
+
+    function onUp() {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (resizingRef.current?.currentW) {
+        const key  = resizingRef.current.colKey
+        const w    = resizingRef.current.currentW
+        const scrollTop  = tablaRef.current?.scrollTop  ?? 0
+        const scrollLeft = tablaRef.current?.scrollLeft ?? 0
+        setColWidths(prev => {
+          if (prev[key] === w) return prev
+          const next = { ...prev, [key]: w }
+          localStorage.setItem(`col_widths_${id}`, JSON.stringify(next))
+          return next
+        })
+        requestAnimationFrame(() => {
+          if (tablaRef.current) {
+            tablaRef.current.scrollTop  = scrollTop
+            tablaRef.current.scrollLeft = scrollLeft
+          }
+        })
+      }
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      resizingRef.current = null
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  function defaultColW(key) {
+    if (key === 'numero_registro') return 40
+    if (key === 'contratista')     return 150
+    if (key === 'observaciones')   return 180
+    if (key === 'estado')          return 190
+    if (['fecha_inicio','fecha_limite','fecha_reporte','fecha_fin_trabajos'].includes(key)) return 100
+    if (key === 'progreso')        return 110
+    if (['val_pen','val_total'].includes(key)) return 90
+    if (['cantidad','cantidad_entregada'].includes(key)) return 100
+    if (key === 'numero_ot')       return 70
+    if (key === 'semana')          return 90
+    if (key === 'actividad')       return 110
+    if (key === 'acciones')        return 80
+    return 110
+  }
 
   const stats = {
     total: ots.length,
@@ -288,6 +365,61 @@ export default function ModuloPage() {
     cargar()
   }
 
+  // Genera y descarga el Word directamente sin mostrar modal
+  async function generarWordDirecto(ot) {
+    const cont = contratistas.find(c => c.id === ot.contratista_id)
+    const hoy  = new Date().toISOString().slice(0, 10)
+    const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
+
+    // Formato fechas para el Word
+    function fmtEntrega(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+    }
+    function fmtDia(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const D = ['dom','lun','mar','mié','jue','vie','sáb']
+      return D[dt.getDay()] + ' ' + String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear()
+    }
+    // Evitar duplicar "Contrato" si ya está en el texto
+    function limpiarContrato(c) {
+      if (!c) return ''
+      return c.replace(/^contrato\s+/i, '').trim()
+    }
+
+    try {
+      const payload = {
+        numero_ot:          String(data.numero_ot||''),
+        codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
+        contrato:           limpiarContrato(data.contrato),
+        fecha_entrega:      fmtEntrega(data.fecha_entrega),
+        fecha_inicio:       fmtDia(data.fecha_inicio),
+        fecha_fin:          fmtDia(data.fecha_fin),
+        fecha_limite:       fmtDia(data.fecha_limite),
+        dias_plazo:         String(data.dias_plazo||'1'),
+        cantidad:           String(data.cantidad||''),
+        actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
+        actividad_label:    String(data.actividad_label||''),
+        cumplimiento:       String(data.cumplimiento||''),
+        editado_por:        String(data.editado_por||''),
+        coordinador:        String(data.coordinador||''),
+        contratista_nombre: String(data.contratista_nombre||''),
+        motivo_extra:       String(data.motivo_extra||''),
+        semana:             String(data.semana||''),
+        titulo:             String(data.titulo||''),
+      }
+      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ actividad: ot.actividad, data: payload }) })
+      if (!res.ok) { alert('Error al generar Word'); return }
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    } catch(e) { alert('Error: ' + e.message) }
+  }
+
   function abrirModalDoc(ot) {
     const cont = contratistas.find(c => c.id === ot.contratista_id)
     const hoy = new Date().toISOString().slice(0, 10)
@@ -299,26 +431,30 @@ export default function ModuloPage() {
   }
 
   function buildDocForm(ot, cont, codigoOT, hoy) {
+    const de = ot.datos_extra || {}
     return {
-      numero_ot: ot.numero_ot || ot.numero_registro,
-      codigo_ot: codigoOT,
-      contrato: cont?.contrato || '',
-      semana: ot.semana || '',
-      fecha_inicio: ot.fecha_inicio || '',
-      fecha_fin: ot.fecha_fin_trabajos || '',
-      fecha_limite: ot.fecha_limite_expedientes || '',
-      dias_plazo: ot.dias_plazo || '',
-      cantidad: ot.cantidad_programada || '',
-      actividad_doc: modulo?.plantilla_actividad || ot.actividad || '',
-      fecha_entrega: hoy,
-      observaciones: ot.observaciones || 'Ninguna',
-      cumplimiento: modulo?.plantilla_cumplimiento || '',
-      actividad_label: modulo?.plantilla_actividad || '',
-      editado_por: modulo?.plantilla_editado_por || '',
-      titulo: modulo?.plantilla_titulo || '',
-      coordinador: 'CONSORCIO SUPERVISOR',
-      area_usuaria: 'ELECTROPUNO S.A.A',
-      contratista_nombre: cont?.nombre || '',
+      numero_ot:          ot.numero_ot || ot.numero_registro,
+      codigo_ot:          de.doc_codigo_ot    || codigoOT,
+      contrato:           cont?.contrato || '',
+      semana:             ot.semana || '',
+      fecha_inicio:       ot.fecha_inicio || '',
+      fecha_fin:          ot.fecha_fin_trabajos || '',
+      fecha_limite:       ot.fecha_limite_expedientes || '',
+      dias_plazo:         ot.dias_plazo || '',
+      cantidad:           ot.cantidad_programada || '',
+      fecha_entrega:      de.doc_fecha_entrega      || hoy,
+      coordinador:        de.doc_coordinador        || 'CONSORCIO SUPERVISOR',
+      area_usuaria:       de.doc_area_usuaria       || 'ELECTROPUNO S.A.A',
+      contratista_nombre: de.doc_contratista_firma  || cont?.nombre || '',
+      firma4:             de.doc_firma4             || '',
+      actividad_doc:      de.doc_actividad          || modulo?.plantilla_actividad || ot.actividad || '',
+      actividad_label:    de.doc_actividad          || modulo?.plantilla_actividad || ot.actividad || '',
+      editado_por:        de.doc_editado_por        || modulo?.plantilla_editado_por || '',
+      cumplimiento:       de.doc_cumplimiento       || modulo?.plantilla_cumplimiento || '',
+      titulo:             de.doc_titulo             || modulo?.plantilla_titulo || '',
+      observaciones:      ot.observaciones || 'Ninguna',
+      motivo_extra:       ot.motivo_ot || '',
+      version_firma:      de.doc_version || 'espacios',
     }
   }
 
@@ -368,6 +504,7 @@ export default function ModuloPage() {
     if (c.key === 'motivo_ot')   return esOT
     if (c.key === 'contrato')    return esOT
     if (c.key === 'accion_doc')  return esOT && tienePlantilla
+    if (c.key === 'cantidad_entregada') return [1,2,3].includes(parseInt(id))
     return true
   }).filter(c => isColVisible(c.key))
 
@@ -386,15 +523,26 @@ export default function ModuloPage() {
     )
     const extraUsados = new Set()
     if (savedOrder && savedOrder.length > 0) {
+      // Columnas nuevas que no estaban en el orden guardado → inyectarlas en posición lógica
+      const nuevasBase = colsActivasBase.filter(c =>
+        c.key !== 'numero_registro' && !savedOrder.includes(c.key)
+      )
       savedOrder.forEach(k => {
         if (k === 'numero_registro' || k === 'acciones') return
         if (baseKeys.has(k)) {
           if (isColVisible(k) && baseColMap[k]) result.push(baseColMap[k])
+          // Si esta es fecha_reporte, inyectar cantidad_entregada justo después si aplica
+          if (k === 'fecha_reporte' && nuevasBase.find(c => c.key === 'cantidad_entregada')) {
+            result.push({ key: 'cantidad_entregada', label: 'Cant. Entregada' })
+          }
         } else {
           const extra = extraByClave[k]
           if (extra) { result.push(extra); extraUsados.add(extra.id) }
         }
       })
+      // Otras columnas nuevas no inyectadas aún
+      nuevasBase.filter(c => c.key !== 'cantidad_entregada' && !result.find(r => r.key === c.key))
+        .forEach(c => result.push(c))
       camposExtra.filter(c => c.en_tabla && !extraUsados.has(c.id))
         .sort((a,b) => a.orden - b.orden)
         .forEach(c => result.push({ key: `extra_${c.id}`, label: c.nombre }))
@@ -529,7 +677,6 @@ export default function ModuloPage() {
         {[
           { key: 'tabla', label: '📋 Listado' },
           { key: 'gantt', label: '📅 Gantt' },
-          { key: 'dashboard', label: '📊 Dashboard' },
           { key: 'campos', label: '⚙️ Campos' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -620,18 +767,24 @@ export default function ModuloPage() {
             {/* Tabla con header sticky */}
             <div className="rounded-xl border border-gray-800 overflow-hidden">
               <div ref={tablaRef} className="overflow-auto" style={{ maxHeight: 'calc(100vh - 400px)' }}>
-                <table className="tabla-base w-full">
+                <table className="tabla-base" style={{ width: todasColsOrdenadas.reduce((s,c) => s + (colWidths[c.key] || defaultColW(c.key)), 0) }}>
+                  <colgroup>
+                    {todasColsOrdenadas.map(col => (
+                      <col key={col.key} style={{ width: colWidths[col.key] || defaultColW(col.key) }} />
+                    ))}
+                  </colgroup>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#0f172a' }}>
                     <tr>
                       {modoEliminar && <th className="w-8"><input type="checkbox" className="accent-blue-500" checked={seleccionados.size===otsFiltradas.length && otsFiltradas.length>0} onChange={seleccionarTodas} /></th>}
                       {todasColsOrdenadas.map(col => {
-                        if (col.key === 'numero_registro') return <th key="nr" style={{width:36,minWidth:36,padding:'4px 2px',textAlign:'center',fontSize:'0.7rem',color:'#6b7280',borderRight:'none',background:'transparent',position:'sticky',left:0,zIndex:2}}>N°</th>
-                        if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} />
-                        if (col.key === 'acciones') return <th key="acc">Acciones</th>
-                        if (col.key.startsWith('extra_')) return <th key={col.key}>{col.label}</th>
+                        const w = colWidths[col.key] || defaultColW(col.key)
+                        if (col.key === 'numero_registro') return <th key="nr" style={{padding:'4px 2px',textAlign:'center',fontSize:'0.7rem',color:'#6b7280',borderRight:'none',background:'transparent',position:'sticky',left:0,zIndex:2}}>N°</th>
+                        if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
+                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative'}}>Acciones<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
+                        if (col.key.startsWith('extra_')) return <th key={col.key} style={{position:'relative'}}>{col.label}<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
                         if (['contratista','semana','fecha_inicio','fecha_limite','fecha_reporte','cantidad','estado'].includes(col.key))
-                          return <SortTh key={col.key} k={col.key} label={col.label} sc={sortCfg} ts={toggleSort} />
-                        return <th key={col.key}>{col.label}</th>
+                          return <SortTh key={col.key} k={col.key} label={col.label} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
+                        return <th key={col.key} style={{position:'relative'}}>{col.label}<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
                       })}
                     </tr>
                   </thead><tbody>
@@ -649,7 +802,7 @@ export default function ModuloPage() {
                             const k = col.key
                             if (k === 'numero_registro') return <td key="nr" style={{width:36,minWidth:36,padding:'4px 2px',textAlign:'center',fontSize:'0.75rem',fontWeight:'bold',color:'#94a3b8',background:seleccionados.has(ot.id)?'#1e3a5f':'#0d1526',borderRight:'2px solid #1e293b',position:'sticky',left:0,zIndex:1}}>{ot.numero_registro}</td>
                             if (k === 'numero_ot') return <td key={k} className="font-mono font-semibold text-blue-400">{idPrincipal(ot)}</td>
-                            if (k === 'contratista') return <td key={k}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:ot._cont?.color||'#666'}}/><span className="truncate max-w-32 text-xs">{ot._cont?.nombre||'—'}</span></div></td>
+                            if (k === 'contratista') return <td key={k}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:ot._cont?.color||'#666'}}/><span className="text-xs">{ot._cont?.nombre||'—'}</span></div></td>
                             if (k === 'actividad') return <td key={k} className="text-xs">{ot.actividad||'—'}</td>
                             if (k === 'motivo_ot') return <td key={k}><span className="text-xs bg-gray-800 px-2 py-0.5 rounded">{ot.motivo_ot||'—'}</span></td>
                             if (k === 'semana') return <td key={k} className="text-xs text-gray-400">{ot.semana||'—'}</td>
@@ -660,25 +813,41 @@ export default function ModuloPage() {
                             if (k === 'fecha_limite') return <td key={k} className="font-mono text-xs font-semibold">{fmtFecha(ot.fecha_limite_expedientes)}</td>
                             if (k === 'dias_plazo') return <td key={k} className="text-center font-mono text-xs">{ot.dias_plazo??'—'}</td>
                             if (k === 'cantidad') return <td key={k} className="text-center text-xs">{ot.cantidad_programada??'—'}</td>
+                            if (k === 'cantidad_entregada') {
+                              const prog = ot.cantidad_programada > 0 && ot.cantidad_entregada !== null
+                                ? Math.round(ot.cantidad_entregada / ot.cantidad_programada * 100)
+                                : null
+                              return (
+                                <td key={k} className="text-center text-xs">
+                                  <span>{ot.cantidad_entregada ?? '—'}</span>
+                                  {prog !== null && (
+                                    <span className="ml-1 text-xs font-mono" style={{ color: prog >= 100 ? '#22c55e' : prog >= 80 ? '#eab308' : '#ef4444' }}>
+                                      ({prog}%)
+                                    </span>
+                                  )}
+                                </td>
+                              )
+                            }
                             if (k === 'fecha_reporte') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_reporte)}</td>
                             if (k === 'estado') {
                               const diasStr = dias === null ? '' : dias < 0 ? ` · ${Math.abs(dias)}d atrás` : ot.estado === 4 ? ` · ${dias}d rest.` : ''
-                              return <td key={k}><span className={`badge ${info.color}`} style={{fontSize:'10px',whiteSpace:'nowrap'}}>{info.label}{diasStr}</span></td>
+                              const color = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
+                              return <td key={k} style={{overflow:'hidden'}}><span style={{color, fontSize:'11px', fontWeight:600, whiteSpace:'nowrap'}}>{info.label}{diasStr}</span></td>
                             }
                             if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
                             if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
                             if (k === 'val_pen') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_penalidades_manual||0)>0?'#fbbf24':'#6b7280'}}>{(ot.val_penalidades_manual||0)>0?fmtMoneda(ot.val_penalidades_manual):'—'}</td>
                             if (k === 'val_total') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_total_penalidad||0)>0?'#ef4444':'#6b7280'}}>{(ot.val_total_penalidad||0)>0?fmtMoneda(ot.val_total_penalidad):'—'}</td>
-                            if (k === 'observaciones') return <td key={k} className="text-xs text-gray-500 max-w-32 truncate">{ot.observaciones||'—'}</td>
+                            if (k === 'observaciones') return <td key={k} className="text-xs text-gray-500">{ot.observaciones||'—'}</td>
                             if (k === 'eficiencia') return <td key={k} className="text-xs font-mono font-semibold" style={{color:efInfo.color}}>{efInfo.label}</td>
-                            if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<button className="btn-ghost text-xs py-1 px-2" onClick={()=>abrirModalDoc(ot)}>📄</button>:'—'}</td>
+                            if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<button className="btn-ghost text-xs py-1 px-2" title="Descargar Word" onClick={()=>generarWordDirecto(ot)}>📄</button>:'—'}</td>
                             if (k.startsWith('extra_')) {
                               const campo = camposExtra.find(c => `extra_${c.id}` === k)
                               return <td key={k} className="text-xs text-gray-400">{campo?(ot.datos_extra?.[campo.clave]??'—'):'—'}</td>
                             }
                             if (k === 'acciones') {
                               const docEnColumnaPropia = todasColsOrdenadas.some(c => c.key === 'accion_doc')
-                              return <td key="acc">{!modoEliminar?(<div className="flex gap-1">{tienePlantilla&&!docEnColumnaPropia&&<button className="btn-ghost text-xs py-1 px-2" onClick={()=>abrirModalDoc(ot)}>📄</button>}<button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(ot);setModalOpen(true)}}>✏️</button></div>):(<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ot.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(ot.id)}>{seleccionados.has(ot.id)?'☑':'☐'}</button>)}</td>
+                              return <td key="acc">{!modoEliminar?(<div className="flex gap-1">{tienePlantilla&&!docEnColumnaPropia&&<button className="btn-ghost text-xs py-1 px-2" title="Descargar Word" onClick={()=>generarWordDirecto(ot)}>📄</button>}<button className="btn-ghost text-xs py-1 px-2" title="Registrar seguimiento" onClick={()=>{setOtSeg(ot);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(ot);setModalOpen(true)}}>✏️</button></div>):(<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ot.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(ot.id)}>{seleccionados.has(ot.id)?'☑':'☐'}</button>)}</td>
                             }
                             return null
                           })}
@@ -693,7 +862,6 @@ export default function ModuloPage() {
         )}
 
         {tab === 'gantt' && <GanttModulo ots={otsFiltradas} contratistas={contratistas} modulo={modulo} />}
-        {tab === 'dashboard' && <DashboardModulo ots={ots} contratistas={contratistas} modulo={modulo} />}
 
         {/* ── CAMPOS — con preview estilo Excel ── */}
         {tab === 'campos' && (
@@ -788,8 +956,19 @@ export default function ModuloPage() {
         <ModalOT modulo={modulo} contratistas={contratistas} camposExtra={camposExtra}
           actividades={actividades} motivos={motivos} periodo={periodo}
           ot={editando} colsVisibles={colsVisibles} totalRegistros={ots.length}
-          onClose={() => setModalOpen(false)}
-          onSave={() => { setModalOpen(false); cargar() }} />
+          onClose={() => { setModalOpen(false); cargar() }}
+          onSave={() => { cargar() }} />
+      )}
+
+      {/* ── MODAL SEGUIMIENTO ── */}
+      {modalSeg && otSeg && (
+        <ModalSeguimiento
+          ot={otSeg}
+          modulo={modulo}
+          contratistas={contratistas}
+          periodo={periodo}
+          onClose={() => { setModalSeg(false); setOtSeg(null) }}
+          onSave={() => { setModalSeg(false); setOtSeg(null); cargar() }} />
       )}
 
       {/* ── MODAL NUEVO CAMPO ── */}
@@ -868,97 +1047,64 @@ export default function ModuloPage() {
 
       {modalDoc && otParaDoc && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModalDoc(false) }}>
-          <div className="modal-box" style={{ maxWidth: 700 }}>
+          <div className="modal-box" style={{ maxWidth: 480 }}>
             <div className="modal-header">
-              <h2 className="text-base font-bold text-white">📄 Generar Documento — {esOT ? `OT #${idPrincipal(otParaDoc)}` : `Reg. #${otParaDoc.numero_registro}`}</h2>
+              <div>
+                <h2 className="text-base font-bold text-white">📄 Generar Documento</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{esOT ? `OT #${idPrincipal(otParaDoc)}` : `Reg. #${otParaDoc.numero_registro}`} · {otParaDoc.actividad}</p>
+              </div>
               <button onClick={() => setModalDoc(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
             </div>
-            <div className="p-6" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
-              <p className="text-xs text-gray-400 mb-4">Todos los campos son editables. Los valores están precargados desde el registro.</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Título del documento</label>
-                  <input className="input-base" value={docForm.titulo || ''} onChange={e => setDocForm(p => ({ ...p, titulo: e.target.value }))} />
-                </div>
+            <div className="p-6 space-y-4">
+              {/* Resumen precargado */}
+              <div className="p-3 rounded-xl border border-gray-800 bg-gray-900 space-y-1.5 text-xs">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Datos precargados del registro</div>
+                {[
+                  ['N° OT', docForm.numero_ot],
+                  ['Código OT', docForm.codigo_ot],
+                  ['Contrato', docForm.contrato],
+                  ['Semana', docForm.semana],
+                  ['Fecha inicio', docForm.fecha_inicio],
+                  ['Fecha límite', docForm.fecha_limite],
+                  ['Días plazo', docForm.dias_plazo],
+                  ['Cantidad', docForm.cantidad],
+                  ['Contratista', docForm.contratista_nombre],
+                ].filter(([, v]) => v).map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-2">
+                    <span className="text-gray-600">{k}</span>
+                    <span className="text-gray-300 font-mono text-right truncate max-w-52">{v}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Solo los campos ajustables */}
+              <div className="space-y-3">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ajustes del documento</div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">N° OT</label>
-                  <input className="input-base" value={docForm.numero_ot || ''} onChange={e => setDocForm(p => ({ ...p, numero_ot: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT (EPUxxIPxx)</label>
-                  <input className="input-base" value={docForm.codigo_ot || ''} onChange={e => setDocForm(p => ({ ...p, codigo_ot: e.target.value }))} placeholder="EPU16IP26" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Contrato</label>
-                  <input className="input-base" value={docForm.contrato || ''} onChange={e => setDocForm(p => ({ ...p, contrato: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Semana</label>
-                  <input className="input-base" value={docForm.semana || ''} onChange={e => setDocForm(p => ({ ...p, semana: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio trabajo</label>
-                  <input className="input-base" type="date" value={docForm.fecha_inicio || ''} onChange={e => setDocForm(p => ({ ...p, fecha_inicio: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha final trabajo</label>
-                  <input className="input-base" type="date" value={docForm.fecha_fin || ''} onChange={e => setDocForm(p => ({ ...p, fecha_fin: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite expedientes</label>
-                  <input className="input-base" type="date" value={docForm.fecha_limite || ''} onChange={e => setDocForm(p => ({ ...p, fecha_limite: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">📅 Fecha entrega OT</label>
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">📅 Fecha entrega OT <span className="text-gray-600 font-normal">(cuándo debe entregarse)</span></label>
                   <input className="input-base" type="date" value={docForm.fecha_entrega || ''} onChange={e => setDocForm(p => ({ ...p, fecha_entrega: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Plazo (días)</label>
-                  <input className="input-base" type="number" value={docForm.dias_plazo || ''} onChange={e => setDocForm(p => ({ ...p, dias_plazo: e.target.value }))} />
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Coordinador (firma)</label>
+                  <input className="input-base" placeholder="CONSORCIO SUPERVISOR" value={docForm.coordinador || ''} onChange={e => setDocForm(p => ({ ...p, coordinador: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Cantidad</label>
-                  <input className="input-base" type="number" value={docForm.cantidad || ''} onChange={e => setDocForm(p => ({ ...p, cantidad: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label>
-                  <input className="input-base" value={docForm.cumplimiento || ''} onChange={e => setDocForm(p => ({ ...p, cumplimiento: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad (en doc.)</label>
-                  <input className="input-base" value={docForm.actividad_label || ''} onChange={e => setDocForm(p => ({ ...p, actividad_label: e.target.value, actividad_doc: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label>
-                  <input className="input-base" value={docForm.editado_por || ''} onChange={e => setDocForm(p => ({ ...p, editado_por: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Coordinador (firma 1)</label>
-                  <input className="input-base" value={docForm.coordinador || ''} onChange={e => setDocForm(p => ({ ...p, coordinador: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Área usuaria (firma 2)</label>
-                  <input className="input-base" value={docForm.area_usuaria || ''} onChange={e => setDocForm(p => ({ ...p, area_usuaria: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-400 block mb-1">Contratista (firma 3)</label>
-                  <input className="input-base" value={docForm.contratista_nombre || ''} onChange={e => setDocForm(p => ({ ...p, contratista_nombre: e.target.value }))} />
+                  <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha final de trabajo <span className="text-gray-600 font-normal">(opcional)</span></label>
+                  <input className="input-base" type="date" value={docForm.fecha_fin || ''} onChange={e => setDocForm(p => ({ ...p, fecha_fin: e.target.value }))} />
                 </div>
               </div>
+
               {/* Versión de firmas */}
-              <div className="mt-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
+              <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
                 <div className="text-xs font-semibold text-gray-300 mb-2">✍️ Versión de firmas</div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2">
                   {[
-                    { v: 'espacios',   l: 'Con espacio para firmar', desc: 'Área en blanco para firmar a mano o añadir imagen' },
-                    { v: 'firmado',    l: 'Con firmas reales', desc: 'Cuando subas el Word firmado, se insertarán aquí' },
-                  ].map(({ v, l, desc }) => (
-                    <label key={v} className={`flex items-start gap-2 px-3 py-2 rounded-lg border cursor-pointer flex-1 min-w-36 transition-all ${versionFirma === v ? 'border-blue-600 bg-blue-950' : 'border-gray-800 hover:border-gray-700'}`}>
-                      <input type="radio" className="accent-blue-500 mt-0.5" checked={versionFirma === v} onChange={() => setVersionFirma(v)} />
-                      <div>
-                        <div className={`text-xs font-semibold ${versionFirma === v ? 'text-blue-300' : 'text-gray-400'}`}>{l}</div>
-                        <div className="text-xs text-gray-600 mt-0.5">{desc}</div>
-                      </div>
+                    { v: 'espacios', l: 'Con espacio para firmar' },
+                    { v: 'firmado',  l: 'Con firmas reales' },
+                  ].map(({ v, l }) => (
+                    <label key={v} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer flex-1 transition-all ${versionFirma === v ? 'border-blue-600 bg-blue-950' : 'border-gray-800 hover:border-gray-700'}`}>
+                      <input type="radio" className="accent-blue-500" checked={versionFirma === v} onChange={() => setVersionFirma(v)} />
+                      <span className={`text-xs font-semibold ${versionFirma === v ? 'text-blue-300' : 'text-gray-400'}`}>{l}</span>
                     </label>
                   ))}
                 </div>
@@ -977,6 +1123,7 @@ export default function ModuloPage() {
                         actividad_label: String(docForm.actividad_label||''), cumplimiento: String(docForm.cumplimiento||''),
                         editado_por: String(docForm.editado_por||''), coordinador: String(docForm.coordinador||''),
                         contratista_nombre: String(docForm.contratista_nombre||''), motivo_extra: String(docForm.motivo_extra||''),
+                        semana: String(docForm.semana||''), titulo: String(docForm.titulo||''),
                       }
                       const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ actividad: otParaDoc.actividad, data }) })
                       if (!res.ok) { alert('Error al generar Word'); return }
@@ -1003,7 +1150,7 @@ export default function ModuloPage() {
                   setTimeout(() => URL.revokeObjectURL(url), 2000)
                   setModalDoc(false)
                 } catch(e) { alert('Error: ' + e.message) }
-              }}>📥 Descargar PDF</button>
+              }}>📥 PDF</button>
             </div>
           </div>
         </div>
@@ -1119,14 +1266,15 @@ export default function ModuloPage() {
 }
 
 // ── SortTh — columna ordenable ────────────────────────────────────────────────
-function SortTh({ k, label, sc, ts }) {
+function SortTh({ k, label, sc, ts, onResize }) {
   const active = sc.key === k
   return (
-    <th onClick={() => ts(k)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+    <th onClick={() => ts(k)} style={{ cursor: 'pointer', userSelect: 'none', position: 'relative' }}>
       {label}
       <span className="ml-1 text-xs" style={{ color: active ? '#60a5fa' : '#4b5563' }}>
         {active ? (sc.dir === 'asc' ? '↑' : '↓') : '↕'}
       </span>
+      {onResize && <span className="col-resize-handle" onMouseDown={e => { e.stopPropagation(); onResize(e) }}/>}
     </th>
   )
 }
@@ -1486,6 +1634,156 @@ function DashboardModulo({ ots, contratistas, modulo }) {
         </div>
       )}
 
+    </div>
+  )
+}
+// ── ModalSeguimiento ──────────────────────────────────────────
+function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }) {
+  const [form, setForm] = useState({
+    fecha_reporte:          ot.fecha_reporte || '',
+    cantidad_entregada:     ot.cantidad_entregada ?? '',
+    val_penalidades_manual: ot.val_penalidades_manual || '',
+    observaciones:          ot.observaciones || '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+
+  const cont          = contratistas.find(c => c.id === ot.contratista_id)
+  const esOTmodulo    = modulo?.tipo === 'ot'
+  const tieneCantidad = [1,2,3].includes(modulo?.id) && ot.cantidad_programada > 0
+  const idLabel       = esOTmodulo ? `OT #${ot.numero_ot || ot.numero_registro}` : `Reg. #${ot.numero_registro}`
+
+  const pctCant = tieneCantidad && form.cantidad_entregada !== ''
+    ? Math.min(200, Math.round(parseInt(form.cantidad_entregada) / ot.cantidad_programada * 100))
+    : null
+
+  let estadoPreview = null
+  if (form.fecha_reporte && ot.fecha_limite_expedientes) {
+    const lim = new Date(ot.fecha_limite_expedientes + 'T00:00:00')
+    const rep = new Date(form.fecha_reporte + 'T00:00:00')
+    const dias = Math.round((rep - lim) / 86400000)
+    estadoPreview = dias <= 0
+      ? { label: '✓ A tiempo', color: '#22c55e' }
+      : { label: `⚠ Tarde — ${dias}d fuera`, color: '#f97316' }
+  }
+
+  async function guardar() {
+    if (!form.fecha_reporte) { setError('La fecha de reporte es requerida.'); return }
+    setSaving(true)
+    const { error: err } = await supabase.from('ots').update({
+      fecha_reporte:          form.fecha_reporte || null,
+      cantidad_entregada:     form.cantidad_entregada !== '' ? parseInt(form.cantidad_entregada) : null,
+      val_penalidades_manual: form.val_penalidades_manual ? parseFloat(form.val_penalidades_manual) : 0,
+      observaciones:          form.observaciones || null,
+      actualizado_en:         new Date().toISOString(),
+    }).eq('id', ot.id)
+    if (err) { setError(err.message); setSaving(false); return }
+    onSave()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal-box" style={{ maxWidth: 480 }}>
+        <div style={{ background: '#1d4ed8', borderRadius: '12px 12px 0 0', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="text-sm font-bold text-white">📊 Registrar seguimiento</div>
+            <div className="text-xs mt-0.5" style={{ color: '#bfdbfe' }}>
+              {idLabel} · {modulo?.icono} {modulo?.nombre}
+              {ot.actividad && ` · ${ot.actividad}`}
+              {ot.semana && ` · ${ot.semana}`}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white opacity-70 hover:opacity-100 text-xl w-7 h-7 flex items-center justify-center">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="p-3 rounded-lg border border-gray-800 text-xs" style={{ background: '#0d1526' }}>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <div className="text-gray-500">Límite</div>
+                <div className="font-mono font-bold text-gray-200 mt-0.5">
+                  {ot.fecha_limite_expedientes
+                    ? new Date(ot.fecha_limite_expedientes+'T00:00:00').toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit'})
+                    : '—'}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Programado</div>
+                <div className="font-mono font-bold text-gray-200 mt-0.5">{ot.cantidad_programada || '—'}</div>
+              </div>
+              <div>
+                <div className="text-gray-500">Contratista</div>
+                <div className="font-mono text-gray-300 mt-0.5 truncate" style={{fontSize:10}}>{cont?.nombre?.split('–')[0]?.trim() || '—'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha de reporte <span className="text-red-400">*</span></label>
+            <input className="input-base" type="date" autoFocus
+              value={form.fecha_reporte} onChange={e => setForm(p => ({ ...p, fecha_reporte: e.target.value }))} />
+          </div>
+
+          {tieneCantidad && (
+            <div>
+              <label className="text-xs font-semibold text-gray-400 block mb-1">
+                Cantidad entregada <span className="text-gray-600 font-normal">de {ot.cantidad_programada} programadas</span>
+              </label>
+              <input className="input-base" type="number" min="0" placeholder="Ej: 100"
+                value={form.cantidad_entregada} onChange={e => setForm(p => ({ ...p, cantidad_entregada: e.target.value }))} />
+              {pctCant !== null && (
+                <div className="mt-1.5">
+                  <div className="flex justify-between text-xs mb-0.5">
+                    <span className="text-gray-600">Cumplimiento</span>
+                    <span className="font-mono font-bold" style={{ color: pctCant>=100?'#22c55e':pctCant>=80?'#eab308':'#ef4444' }}>{pctCant}%</span>
+                  </div>
+                  <div style={{ height:4, background:'#1f2937', borderRadius:2, overflow:'hidden' }}>
+                    <div style={{ width:`${Math.min(pctCant,100)}%`, height:'100%', background:pctCant>=100?'#22c55e':pctCant>=80?'#eab308':'#ef4444', transition:'width 0.3s' }}/>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {esOTmodulo && modulo?.tiene_penalidad && (
+            <div>
+              <label className="text-xs font-semibold text-gray-400 block mb-1">Penalización manual (S/)</label>
+              <input className="input-base" type="number" min="0" step="0.01" placeholder="0.00"
+                value={form.val_penalidades_manual} onChange={e => setForm(p => ({ ...p, val_penalidades_manual: e.target.value }))} />
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-gray-400 block mb-1">Observaciones</label>
+            <textarea className="input-base" rows={3} placeholder="Notas del proceso, incidencias, justificaciones..."
+              value={form.observaciones} onChange={e => setForm(p => ({ ...p, observaciones: e.target.value }))} />
+          </div>
+
+          {estadoPreview && (
+            <div className="p-3 rounded-lg border border-gray-800 text-xs" style={{ background: '#0d1526' }}>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Estado estimado</span>
+                <span className="font-bold" style={{ color: estadoPreview.color }}>{estadoPreview.label}</span>
+              </div>
+              {pctCant !== null && (
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-gray-500">Cantidad</span>
+                  <span className="font-mono" style={{ color: pctCant>=100?'#22c55e':pctCant>=80?'#eab308':'#ef4444' }}>{pctCant}% entregado</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && <div className="p-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-xs">❌ {error}</div>}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar} disabled={saving}>
+            {saving ? '⏳ Guardando...' : '💾 Guardar seguimiento'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
