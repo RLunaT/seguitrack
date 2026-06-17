@@ -131,7 +131,7 @@ export default function NotificacionesPage() {
       whatsapp:      form.whatsapp.trim(),
       callmebot_key: form.callmebot_key.trim(),
       pin_hash,
-      dias_critico:  parseInt(form.dias_critico) || 3,
+      dias_critico:  Math.min(3, Math.max(1, parseInt(form.dias_critico) || 3)),
       notif_whatsapp: true,
       activo:        form.activo,
     }
@@ -434,8 +434,8 @@ export default function NotificacionesPage() {
 
               <div>
                 <label className="text-xs font-semibold text-gray-400 block mb-1">⚠️ Días de alerta antes del vencimiento</label>
-                <input className="input-base" type="number" min="1" max="30" value={form.dias_critico} onChange={e => setForm(p => ({ ...p, dias_critico: e.target.value }))} />
-                <p className="text-xs text-gray-600 mt-1">Recibirás una alerta este número de días antes de que venza el registro</p>
+                <input className="input-base" type="number" min="1" max="3" value={form.dias_critico} onChange={e => setForm(p => ({ ...p, dias_critico: Math.min(3, Math.max(1, parseInt(e.target.value) || 1)) }))} />
+                <p className="text-xs text-gray-600 mt-1">Máximo 3 días — es el mismo umbral con el que el sistema marca una OT como "Por vencer" en toda la app. Recibirás la alerta este número de días antes de que venza.</p>
               </div>
 
               {/* Timeline */}
