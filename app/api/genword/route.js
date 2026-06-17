@@ -51,7 +51,7 @@ function replaceAll(xml, data) {
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { actividad, data: rawData } = body
+    const { actividad, modulo_id, data: rawData } = body
 
     const data = {
       ot:  rawData.numero_ot          || '',
@@ -72,15 +72,28 @@ export async function POST(request) {
       mx:  rawData.motivo_extra       || rawData.motivo_ot || '',
     }
 
-    let templateName
-    if (actividad === 'Contraste' || actividad === 'Contrastes') {
-      templateName = 'template_contrastes.docx'
-    } else if (actividad === 'Avisos') {
-      templateName = 'template_avisos.docx'
-    } else if (actividad === 'Reemplazo') {
-      templateName = 'template_reemplazo.docx'
-    } else {
-      return NextResponse.json({ error: 'Actividad no soportada: ' + actividad }, { status: 400 })
+    // Mapeo principal por modulo_id (estable, no depende del texto libre de "actividad")
+    const TEMPLATE_POR_MODULO = {
+      1: 'template_contrastes.docx', // Contrastes de Medidores
+      2: 'template_avisos.docx',     // Avisos de Medidores
+      3: 'template_reemplazo.docx',  // Reemplazos de Medidores
+    }
+
+    let templateName = TEMPLATE_POR_MODULO[modulo_id]
+
+    // Fallback: compatibilidad con llamadas antiguas que solo mandan "actividad"
+    if (!templateName) {
+      if (actividad === 'Contraste' || actividad === 'Contrastes') {
+        templateName = 'template_contrastes.docx'
+      } else if (actividad === 'Avisos') {
+        templateName = 'template_avisos.docx'
+      } else if (actividad === 'Reemplazo') {
+        templateName = 'template_reemplazo.docx'
+      }
+    }
+
+    if (!templateName) {
+      return NextResponse.json({ error: 'No se pudo determinar la plantilla. modulo_id: ' + modulo_id + ', actividad: ' + actividad }, { status: 400 })
     }
 
     const templatePath = path.join(process.cwd(), 'public', 'templates', templateName)

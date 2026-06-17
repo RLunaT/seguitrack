@@ -411,7 +411,7 @@ export default function ModuloPage() {
         semana:             String(data.semana||''),
         titulo:             String(data.titulo||''),
       }
-      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ actividad: ot.actividad, data: payload }) })
+      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
       if (!res.ok) { alert('Error al generar Word'); return }
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
@@ -1125,7 +1125,7 @@ export default function ModuloPage() {
                         contratista_nombre: String(docForm.contratista_nombre||''), motivo_extra: String(docForm.motivo_extra||''),
                         semana: String(docForm.semana||''), titulo: String(docForm.titulo||''),
                       }
-                      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ actividad: otParaDoc.actividad, data }) })
+                      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
                       if (!res.ok) { alert('Error al generar Word'); return }
                       const blob = await res.blob()
                       const url = URL.createObjectURL(blob)
@@ -1136,7 +1136,7 @@ export default function ModuloPage() {
               <button className="btn-primary" onClick={async () => {
                 try {
                   const data = { ...docForm, titulo: docForm.titulo || otParaDoc.actividad }
-                  const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actividad: otParaDoc.actividad, data }) })
+                  const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
                   if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
                   const arrayBuffer = await res.arrayBuffer()
                   const blob = new Blob([arrayBuffer], { type: 'application/pdf' })

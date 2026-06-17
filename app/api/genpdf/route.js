@@ -125,7 +125,7 @@ const CSS = '@page{size:279.4mm 215.9mm landscape;margin:16mm 14mm 20mm 12mm}*{b
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { actividad, data: r } = body
+    const { actividad, modulo_id, data: r } = body
     const logo = getLogo()
     const f = {
       ot: r.numero_ot||'', sk: r.codigo_ot||r.numero_ot||'',
@@ -140,11 +140,19 @@ export async function POST(request) {
       co: r.contratista_nombre||'', mx: r.motivo_extra||r.motivo_ot||'',
     }
 
-    let body_html
-    if (actividad==='Contraste'||actividad==='Contrastes') body_html=buildContrastes(f,logo)
-    else if (actividad==='Avisos') body_html=buildAvisos(f,logo)
-    else if (actividad==='Reemplazo') body_html=buildReemplazo(f,logo)
-    else return NextResponse.json({error:'Actividad no soportada'},{status:400})
+    // Mapeo principal por modulo_id (estable, no depende del texto libre de "actividad")
+    const BUILDER_POR_MODULO = { 1: buildContrastes, 2: buildAvisos, 3: buildReemplazo }
+    let builder = BUILDER_POR_MODULO[modulo_id]
+
+    // Fallback: compatibilidad con llamadas antiguas que solo mandan "actividad"
+    if (!builder) {
+      if (actividad==='Contraste'||actividad==='Contrastes') builder = buildContrastes
+      else if (actividad==='Avisos') builder = buildAvisos
+      else if (actividad==='Reemplazo') builder = buildReemplazo
+    }
+
+    if (!builder) return NextResponse.json({error:'No se pudo determinar la plantilla. modulo_id: '+modulo_id+', actividad: '+actividad},{status:400})
+    const body_html = builder(f,logo)
 
     const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>'+CSS+'</style></head><body>'+body_html+'<script>window.onload=function(){window.print()}<\/script></body></html>'
 
