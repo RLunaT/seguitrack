@@ -303,7 +303,7 @@ export default function ModuloPage() {
     try {
       const actividades = Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')
       // baseIndex = total actual de registros, para que numero_registro siga la secuencia
-      const { ots: otsImport, errores, advertencias } = await importarExcel(file, contratistas, parseInt(id), actividades, ots.length, camposExtra)
+      const { ots: otsImport, errores, advertencias } = await importarExcel(file, contratistas, parseInt(id), actividades, ots.length, camposExtra, motivos)
       if (otsImport.length > 0) {
         const { error } = await supabase.from('ots').insert(otsImport)
         if (error) throw new Error(error.message)
