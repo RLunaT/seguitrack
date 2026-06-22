@@ -160,6 +160,16 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         u.semana = calcSemana(val)
       }
 
+      // Si la semana cambia (directo por el selector, o indirecto por fecha_inicio),
+      // se descarta el código OT manual guardado para que se regenere con la
+      // semana nueva — evita que quede "congelado" con una semana vieja (ej. EPU16IP26
+      // cuando la semana real ya es 23).
+      if (key === 'semana' || (key === 'fecha_inicio' && val && u.semana !== prev.semana)) {
+        if (u.datos_extra?.doc_codigo_ot) {
+          u.datos_extra = { ...u.datos_extra, doc_codigo_ot: '' }
+        }
+      }
+
       return u
     })
   }
@@ -177,7 +187,13 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         u.fecha_inicio             = fInicio
         u.fecha_fin_trabajos       = fFin
         u.fecha_limite_expedientes = fLimite
-        u.semana = calcSemana(fInicio)
+        const semanaNueva = calcSemana(fInicio)
+        u.semana = semanaNueva
+        // Misma razón que arriba: si la semana cambió por esta cadena de fechas,
+        // el código OT manual se descarta para regenerarse con la semana correcta.
+        if (semanaNueva !== prev.semana && de.doc_codigo_ot) {
+          u.datos_extra = { ...de, doc_codigo_ot: '' }
+        }
       }
       return u
     })
@@ -264,7 +280,10 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       fecha_inicio:       fmtDia(payload.fecha_inicio),
       fecha_fin:          fmtDia(payload.fecha_fin_trabajos),
       fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
-      dias_plazo:         String(payload.dias_plazo || '1'),
+      // Plazo de ejecución para el documento: siempre inicia en 1 por defecto
+      // (no el cálculo real de dias_plazo, que puede ser 12+ días según las
+      // fechas) — el usuario puede editarlo manualmente con doc_dias_plazo.
+      dias_plazo:         String(de.doc_dias_plazo || '1'),
       cantidad:           String(payload.cantidad_programada || ''),
       actividad_doc:      de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
       actividad_label:    de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
@@ -276,14 +295,33 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       contratista_nombre: de.doc_contratista_firma || cont?.nombre || '',
       firma4:             de.doc_firma4 || '',
       semana:             payload.semana || '',
+      periodo:            periodo || '',
       motivo_extra:       payload.motivo_ot || '',
     }
     try {
-      const res  = await fetch('/api/genword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actividad: payload.actividad, data }) })
+      const res  = await fetch('/api/genword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: form.modulo_id, actividad: payload.actividad, data }) })
       if (!res.ok) { alert('Error al generar Word'); return }
       const blob = await res.blob()
-      const url  = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+
+      // Extrae el nombre real del archivo desde el header que envía la API.
+      // window.open() ignora el Content-Disposition y el navegador asigna
+      // un nombre aleatorio (UUID) — forzar la descarga con <a download> sí
+      // respeta el nombre correcto.
+      const disposition = res.headers.get('Content-Disposition') || ''
+      // Prioriza filename* (UTF-8, con tildes/símbolos correctos) sobre el
+      // filename="" ASCII de respaldo — el regex anterior leía el ASCII
+      // primero porque aparece antes en el header, perdiendo tildes y "°".
+      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+      const match = disposition.match(/filename="([^"]+)"/)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (match ? match[1] : `OT_${data.ot}_${payload.actividad}.docx`)
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
     } catch(e) { alert('Error: ' + e.message) }
   }
@@ -518,8 +556,13 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label>
-                      <input className="input-base" placeholder="EPU16IP26"
+                      <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'}
                         value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label>
+                      <input className="input-base" type="number" placeholder="1"
+                        value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label>
@@ -703,7 +746,8 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   <h3 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-3">📄 Documento Word</h3>
                   <div className="grid grid-cols-2 gap-3 p-4 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
                     <div className="col-span-2"><label className="text-xs font-semibold text-gray-400 block mb-1">Título</label><input className="input-base" placeholder={modulo?.plantilla_titulo} value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder="EPU16IP26" value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label><input className="input-base" type="number" placeholder="1" value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label><input className="input-base" placeholder={modulo?.plantilla_cumplimiento} value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)}/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en doc.</label><input className="input-base" placeholder={modulo?.plantilla_actividad} value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)}/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label><input className="input-base" placeholder={modulo?.plantilla_editado_por} value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)}/></div>

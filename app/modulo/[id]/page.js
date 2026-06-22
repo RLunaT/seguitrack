@@ -217,8 +217,20 @@ export default function ModuloPage() {
     if (key === 'numero_ot')       return 70
     if (key === 'semana')          return 90
     if (key === 'actividad')       return 110
-    if (key === 'acciones')        return 80
+    // Doc y Acciones: ancho fijo, no ajustable — evita que el usuario las
+    // achique tanto que los botones queden tapados (ver fix más abajo,
+    // donde se les quita el handle de resize en el encabezado).
+    if (key === 'accion_doc')      return 60
+    if (key === 'acciones')        return 130
     return 110
+  }
+
+  // Doc y Acciones siempre usan su ancho fijo, ignorando cualquier valor
+  // guardado previamente en localStorage (de cuando sí eran ajustables) —
+  // así el fix aplica también a usuarios que ya habían achicado esas columnas.
+  function getColWidth(key) {
+    if (key === 'accion_doc' || key === 'acciones') return defaultColW(key)
+    return colWidths[key] || defaultColW(key)
   }
 
   const stats = {
@@ -409,13 +421,30 @@ export default function ModuloPage() {
         contratista_nombre: String(data.contratista_nombre||''),
         motivo_extra:       String(data.motivo_extra||''),
         semana:             String(data.semana||''),
+        periodo:            String(data.periodo||periodo||''),
         titulo:             String(data.titulo||''),
       }
       const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
       if (!res.ok) { alert('Error al generar Word'); return }
       const blob = await res.blob()
-      const url  = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+
+      // Extrae el nombre real del archivo desde el header — window.open()
+      // ignora el Content-Disposition y el navegador asigna un nombre
+      // aleatorio (UUID) en vez del nombre descriptivo generado por la API.
+      const disposition = res.headers.get('Content-Disposition') || ''
+      // Prioriza filename* (UTF-8, con tildes/símbolos correctos) sobre el
+      // filename="" ASCII de respaldo — aparece antes en el header.
+      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+      const m = disposition.match(/filename="([^"]+)"/)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT_${payload.numero_ot}_${ot.actividad}.docx`)
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
     } catch(e) { alert('Error: ' + e.message) }
   }
@@ -437,10 +466,14 @@ export default function ModuloPage() {
       codigo_ot:          de.doc_codigo_ot    || codigoOT,
       contrato:           cont?.contrato || '',
       semana:             ot.semana || '',
+      periodo:            periodo || '',
       fecha_inicio:       ot.fecha_inicio || '',
       fecha_fin:          ot.fecha_fin_trabajos || '',
       fecha_limite:       ot.fecha_limite_expedientes || '',
-      dias_plazo:         ot.dias_plazo || '',
+      // Plazo de ejecución para el documento: siempre inicia en 1 por defecto
+      // (no el cálculo real ot.dias_plazo, que puede ser 12+ días) — editable
+      // manualmente con doc_dias_plazo.
+      dias_plazo:         de.doc_dias_plazo || '1',
       cantidad:           ot.cantidad_programada || '',
       fecha_entrega:      de.doc_fecha_entrega      || hoy,
       coordinador:        de.doc_coordinador        || 'CONSORCIO SUPERVISOR',
@@ -767,10 +800,10 @@ export default function ModuloPage() {
             {/* Tabla con header sticky */}
             <div className="rounded-xl border border-gray-800 overflow-hidden">
               <div ref={tablaRef} className="overflow-auto" style={{ maxHeight: 'calc(100vh - 400px)' }}>
-                <table className="tabla-base" style={{ width: todasColsOrdenadas.reduce((s,c) => s + (colWidths[c.key] || defaultColW(c.key)), 0) }}>
+                <table className="tabla-base" style={{ width: todasColsOrdenadas.reduce((s,c) => s + getColWidth(c.key), 0) }}>
                   <colgroup>
                     {todasColsOrdenadas.map(col => (
-                      <col key={col.key} style={{ width: colWidths[col.key] || defaultColW(col.key) }} />
+                      <col key={col.key} style={{ width: getColWidth(col.key) }} />
                     ))}
                   </colgroup>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#0f172a' }}>
@@ -780,7 +813,10 @@ export default function ModuloPage() {
                         const w = colWidths[col.key] || defaultColW(col.key)
                         if (col.key === 'numero_registro') return <th key="nr" style={{padding:'4px 2px',textAlign:'center',fontSize:'0.7rem',color:'#6b7280',borderRight:'none',background:'transparent',position:'sticky',left:0,zIndex:2}}>N°</th>
                         if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
-                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative'}}>Acciones<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
+                        // Doc y Acciones: sin handle de resize — ancho fijo siempre,
+                        // para que los botones nunca queden tapados.
+                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative'}}>Acciones</th>
+                        if (col.key === 'accion_doc') return <th key="accdoc" style={{position:'relative'}}>Doc</th>
                         if (col.key.startsWith('extra_')) return <th key={col.key} style={{position:'relative'}}>{col.label}<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
                         if (['contratista','semana','fecha_inicio','fecha_limite','fecha_reporte','cantidad','estado'].includes(col.key))
                           return <SortTh key={col.key} k={col.key} label={col.label} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
@@ -828,11 +864,13 @@ export default function ModuloPage() {
                                 </td>
                               )
                             }
-                            if (k === 'fecha_reporte') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_reporte)}</td>
+                            if (k === 'fecha_reporte') {
+                              const colorEstado = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
+                              return <td key={k} className="font-mono text-xs" style={{color: colorEstado}}>{fmtFecha(ot.fecha_reporte)}</td>
+                            }
                             if (k === 'estado') {
-                              const diasStr = dias === null ? '' : dias < 0 ? ` · ${Math.abs(dias)}d atrás` : ot.estado === 4 ? ` · ${dias}d rest.` : ''
                               const color = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
-                              return <td key={k} style={{overflow:'hidden'}}><span style={{color, fontSize:'11px', fontWeight:600, whiteSpace:'nowrap'}}>{info.label}{diasStr}</span></td>
+                              return <td key={k} style={{overflow:'hidden'}}><span style={{color, fontSize:'11px', fontWeight:600, whiteSpace:'nowrap'}}>{info.label}</span></td>
                             }
                             if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
                             if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
@@ -1123,13 +1161,28 @@ export default function ModuloPage() {
                         actividad_label: String(docForm.actividad_label||''), cumplimiento: String(docForm.cumplimiento||''),
                         editado_por: String(docForm.editado_por||''), coordinador: String(docForm.coordinador||''),
                         contratista_nombre: String(docForm.contratista_nombre||''), motivo_extra: String(docForm.motivo_extra||''),
-                        semana: String(docForm.semana||''), titulo: String(docForm.titulo||''),
+                        semana: String(docForm.semana||''), periodo: String(docForm.periodo||periodo||''), titulo: String(docForm.titulo||''),
                       }
                       const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
                       if (!res.ok) { alert('Error al generar Word'); return }
                       const blob = await res.blob()
+
+                      // Extrae el nombre real del archivo desde el header — window.open()
+                      // ignora el Content-Disposition y el navegador asigna un nombre
+                      // aleatorio (UUID) en vez del nombre descriptivo generado por la API.
+                      const disposition = res.headers.get('Content-Disposition') || ''
+                      // Prioriza filename* (UTF-8) sobre el ASCII de respaldo.
+                      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+                      const m = disposition.match(/filename="([^"]+)"/)
+                      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT_${data.numero_ot}_${otParaDoc.actividad}.docx`)
+
                       const url = URL.createObjectURL(blob)
-                      window.open(url, '_blank')
+                      const a   = document.createElement('a')
+                      a.href = url
+                      a.download = filename
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
                       setTimeout(() => URL.revokeObjectURL(url), 10000)
                     } catch(e) { alert('Error: ' + e.message) }
                   })()}>📝 Word (.docx)</button>

@@ -48,6 +48,55 @@ function replaceAll(xml, data) {
   return result
 }
 
+// Extrae el número de ítem desde el nombre del contratista, ej:
+// "ÍTEM 2-CONSORCIO ALTIPLANO" → "2". Si el contratista no tiene
+// ítem en su nombre (ej. "BUREAU VERITAS DEL PERÚ S.A."), devuelve null.
+function extraerItem(nombreContratista) {
+  const m = String(nombreContratista || '').match(/[ÍIíi]TEM\s*(\d+)/)
+  return m ? m[1] : null
+}
+
+// Limpia el número de contrato para usarlo en un nombre de archivo:
+// quita el prefijo "Contrato N.°" y cambia "/" por "-" (inválido en archivos).
+function limpiarContratoArchivo(contratoRaw) {
+  if (!contratoRaw) return ''
+  return contratoRaw
+    .replace(/^Contrato\s*N\.?°?\s*/i, '')
+    .replace(/\//g, '-')
+    .trim()
+}
+
+// Quita tildes y símbolos especiales (°, etc.) para el nombre de archivo
+// ASCII de respaldo, requerido por el header Content-Disposition estándar.
+function asciiSeguro(str) {
+  return str
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // quita tildes
+    .replace(/°/g, 'o')
+    .replace(/[^\x00-\x7F]/g, '')  // quita cualquier otro caracter no-ASCII
+}
+
+// Quita caracteres no válidos en nombres de archivo de Windows/Mac
+function sanitizarNombreArchivo(nombre) {
+  return nombre.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
+}
+
+// Construye el nombre descriptivo del archivo, ej:
+// "ITEM 2 OT N° 01 Reemplazos de medidor P-227 2026-I Semana 03 Contrato 42-2025-ELPU-GG.docx"
+function construirNombreArchivo(data, actividad) {
+  const item       = extraerItem(data.co)
+  const partes     = []
+  if (item) partes.push(`ITEM ${item}`)
+  partes.push(`OT N° ${data.ot || ''}`)
+  if (data.av) partes.push(data.av)
+  if (data.periodo) partes.push(data.periodo)
+  if (data.semana) partes.push(data.semana)
+  const contratoLimpio = limpiarContratoArchivo(data.ct)
+  if (contratoLimpio) partes.push(`Contrato ${contratoLimpio}`)
+
+  const nombre = partes.length > 0 ? partes.join(' ') : `OT_${data.ot}_${actividad}`
+  return sanitizarNombreArchivo(nombre) + '.docx'
+}
+
 export async function POST(request) {
   try {
     const body = await request.json()
@@ -70,6 +119,8 @@ export async function POST(request) {
       cr:  rawData.coordinador        || 'CONSORCIO SUPERVISOR',
       co:  rawData.contratista_nombre || '',
       mx:  rawData.motivo_extra       || rawData.motivo_ot || '',
+      semana:   rawData.semana   || '',
+      periodo:  rawData.periodo  || '',
     }
 
     // Mapeo principal por modulo_id (estable, no depende del texto libre de "actividad")
@@ -116,13 +167,18 @@ export async function POST(request) {
     }
 
     const output = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
-    const filename = `OT_${data.ot}_${actividad}.docx`
+    const filename = construirNombreArchivo(data, actividad)
 
     return new NextResponse(output, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        // El header HTTP estándar (filename="...") solo soporta ASCII de forma
+        // segura — tildes y símbolos como "°" se corrompen al viajar así.
+        // Se usa filename* con codificación UTF-8 (RFC 5987), que los
+        // navegadores modernos prefieren, más un filename= ASCII de respaldo
+        // (sin tildes/símbolos) para clientes antiguos que no lo soporten.
+        'Content-Disposition': `attachment; filename="${asciiSeguro(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
       },
     })
   } catch (err) {
