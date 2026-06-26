@@ -449,6 +449,73 @@ export default function ModuloPage() {
     } catch(e) { alert('Error: ' + e.message) }
   }
 
+  // Genera y descarga el PDF directamente sin mostrar modal — mismo dato
+  // de origen que generarWordDirecto, mismo manejo de nombre de archivo.
+  async function generarPdfDirecto(ot) {
+    const cont = contratistas.find(c => c.id === ot.contratista_id)
+    const hoy  = new Date().toISOString().slice(0, 10)
+    const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
+
+    function fmtEntrega(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+    }
+    function fmtDia(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const D = ['dom','lun','mar','mié','jue','vie','sáb']
+      return D[dt.getDay()] + ' ' + String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear()
+    }
+    function limpiarContrato(c) {
+      if (!c) return ''
+      return c.replace(/^contrato\s+/i, '').trim()
+    }
+
+    try {
+      const payload = {
+        numero_ot:          String(data.numero_ot||''),
+        codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
+        contrato:           limpiarContrato(data.contrato),
+        fecha_entrega:      fmtEntrega(data.fecha_entrega),
+        fecha_inicio:       fmtDia(data.fecha_inicio),
+        fecha_fin:          fmtDia(data.fecha_fin),
+        fecha_limite:       fmtDia(data.fecha_limite),
+        dias_plazo:         String(data.dias_plazo||'1'),
+        cantidad:           String(data.cantidad||''),
+        actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
+        actividad_label:    String(data.actividad_label||''),
+        cumplimiento:       String(data.cumplimiento||''),
+        editado_por:        String(data.editado_por||''),
+        coordinador:        String(data.coordinador||''),
+        contratista_nombre: String(data.contratista_nombre||''),
+        motivo_extra:       String(data.motivo_extra||''),
+        semana:             String(data.semana||''),
+        periodo:            String(data.periodo||periodo||''),
+        titulo:             String(data.titulo||''),
+      }
+      const res = await fetch('/api/genpdf', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
+      if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+      const arrayBuffer = await res.arrayBuffer()
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
+
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+      const m = disposition.match(/filename="([^"]+)"/)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT_${payload.numero_ot}_${ot.actividad}.pdf`)
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    } catch(e) { alert('Error: ' + e.message) }
+  }
+
   function abrirModalDoc(ot) {
     const cont = contratistas.find(c => c.id === ot.contratista_id)
     const hoy = new Date().toISOString().slice(0, 10)
@@ -878,7 +945,7 @@ export default function ModuloPage() {
                             if (k === 'val_total') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_total_penalidad||0)>0?'#ef4444':'#6b7280'}}>{(ot.val_total_penalidad||0)>0?fmtMoneda(ot.val_total_penalidad):'—'}</td>
                             if (k === 'observaciones') return <td key={k} className="text-xs text-gray-500">{ot.observaciones||'—'}</td>
                             if (k === 'eficiencia') return <td key={k} className="text-xs font-mono font-semibold" style={{color:efInfo.color}}>{efInfo.label}</td>
-                            if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<button className="btn-ghost text-xs py-1 px-2" title="Descargar Word" onClick={()=>generarWordDirecto(ot)}>📄</button>:'—'}</td>
+                            if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<BotonDocumento onWord={()=>generarWordDirecto(ot)} onPdf={()=>generarPdfDirecto(ot)}/>:'—'}</td>
                             if (k.startsWith('extra_')) {
                               const campo = camposExtra.find(c => `extra_${c.id}` === k)
                               return <td key={k} className="text-xs text-gray-400">{campo?(ot.datos_extra?.[campo.clave]??'—'):'—'}</td>
@@ -1188,15 +1255,23 @@ export default function ModuloPage() {
                   })()}>📝 Word (.docx)</button>
               <button className="btn-primary" onClick={async () => {
                 try {
-                  const data = { ...docForm, titulo: docForm.titulo || otParaDoc.actividad }
+                  const data = { ...docForm, periodo: docForm.periodo || periodo, titulo: docForm.titulo || otParaDoc.actividad }
                   const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
                   if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
                   const arrayBuffer = await res.arrayBuffer()
                   const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
+
+                  // Prioriza filename* (UTF-8) sobre el ASCII de respaldo —
+                  // mismo fix aplicado al botón de Word.
+                  const disposition = res.headers.get('Content-Disposition') || ''
+                  const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+                  const mAscii = disposition.match(/filename="([^"]+)"/)
+                  const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (mAscii ? mAscii[1] : `OT_${docForm.codigo_ot || docForm.numero_ot}_${otParaDoc.actividad}.pdf`)
+
                   const url = URL.createObjectURL(blob)
                   const a = document.createElement('a')
                   a.href = url
-                  a.download = 'OT_' + (docForm.codigo_ot || docForm.numero_ot) + '_' + otParaDoc.actividad + '.pdf'
+                  a.download = filename
                   document.body.appendChild(a)
                   a.click()
                   document.body.removeChild(a)
@@ -1315,6 +1390,33 @@ export default function ModuloPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// ── BotonDocumento — un solo botón que abre una pequeña ventana con las
+// opciones Word/PDF, en vez de un menú flotante (que podía cortarse cerca
+// del borde inferior de la pantalla en filas bajas de la tabla).
+function BotonDocumento({ onWord, onPdf }) {
+  const [abierto, setAbierto] = useState(false)
+
+  return (
+    <>
+      <button className="btn-ghost text-xs py-1 px-2" title="Descargar documento" onClick={() => setAbierto(true)}>📄</button>
+      {abierto && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setAbierto(false) }} style={{ zIndex: 60 }}>
+          <div className="modal-box" style={{ maxWidth: 260 }}>
+            <div className="modal-header">
+              <h3 className="text-sm font-bold text-white">Descargar documento</h3>
+              <button onClick={() => setAbierto(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800">✕</button>
+            </div>
+            <div className="px-6 py-5 flex flex-col gap-2">
+              <button className="btn-ghost text-sm justify-center" onClick={() => { setAbierto(false); onWord() }}>📝 Word (.docx)</button>
+              <button className="btn-ghost text-sm justify-center" onClick={() => { setAbierto(false); onPdf() }}>📥 PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

@@ -326,6 +326,76 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
     } catch(e) { alert('Error: ' + e.message) }
   }
 
+  // Genera y descarga el PDF — misma data de origen y mismo manejo de
+  // nombre de archivo que descargarWord.
+  async function descargarPdf() {
+    if (!guardado) return
+    const { payload, cont } = guardado
+    const hoy = new Date().toISOString().slice(0, 10)
+    const de  = payload.datos_extra || {}
+
+    function fmtEntrega(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+    }
+    function fmtDia(d) {
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const D = ['dom','lun','mar','mié','jue','vie','sáb']
+      return D[dt.getDay()] + ' ' + String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear()
+    }
+    function limpiarContrato(c) {
+      if (!c) return ''
+      return c.replace(/^contrato\s+/i, '').trim()
+    }
+
+    const data = {
+      numero_ot:          String(payload.numero_ot || payload.nr || ''),
+      codigo_ot:          String(de.doc_codigo_ot || generarCodigoOT(payload.semana, periodo) || ''),
+      contrato:           limpiarContrato(cont?.contrato || ''),
+      fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || hoy),
+      fecha_inicio:       fmtDia(payload.fecha_inicio),
+      fecha_fin:          fmtDia(payload.fecha_fin_trabajos),
+      fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
+      dias_plazo:         String(de.doc_dias_plazo || '1'),
+      cantidad:           String(payload.cantidad_programada || ''),
+      actividad_doc:      de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
+      actividad_label:    de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
+      editado_por:        de.doc_editado_por  || modulo?.plantilla_editado_por || '',
+      cumplimiento:       de.doc_cumplimiento || modulo?.plantilla_cumplimiento || '',
+      titulo:             de.doc_titulo       || modulo?.plantilla_titulo || '',
+      coordinador:        de.doc_coordinador       || 'CONSORCIO SUPERVISOR',
+      area_usuaria:       de.doc_area_usuaria      || 'ELECTROPUNO S.A.A',
+      contratista_nombre: de.doc_contratista_firma || cont?.nombre || '',
+      firma4:             de.doc_firma4 || '',
+      semana:             payload.semana || '',
+      periodo:            periodo || '',
+      motivo_extra:       payload.motivo_ot || '',
+    }
+    try {
+      const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: form.modulo_id, actividad: payload.actividad, data }) })
+      if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+      const arrayBuffer = await res.arrayBuffer()
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
+
+      const disposition = res.headers.get('Content-Disposition') || ''
+      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
+      const match = disposition.match(/filename="([^"]+)"/)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (match ? match[1] : `OT_${data.ot}_${payload.actividad}.pdf`)
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    } catch(e) { alert('Error: ' + e.message) }
+  }
+
   const cont = contratistas.find(c => c.id === parseInt(form.contratista_id))
   const totalPasos = tienePlantilla ? 3 : 2
 
@@ -633,7 +703,10 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   <div className="text-sm font-bold text-green-300 mb-1">Registro creado</div>
                   <div className="flex gap-2 justify-center mt-3">
                     {tienePlantilla && (
-                      <button className="btn-ghost text-xs" onClick={descargarWord}>📝 Descargar Word</button>
+                      <>
+                        <button className="btn-ghost text-xs" onClick={descargarWord}>📝 Descargar Word</button>
+                        <button className="btn-ghost text-xs" onClick={descargarPdf}>📥 Descargar PDF</button>
+                      </>
                     )}
                     <button className="btn-primary text-xs" onClick={onClose}>✓ Cerrar</button>
                   </div>
@@ -787,6 +860,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
           <div className="modal-footer">
             <button className="btn-ghost" onClick={onClose}>Cancelar</button>
             {guardado && tienePlantilla && <button className="btn-ghost" onClick={descargarWord}>📝 Word</button>}
+            {guardado && tienePlantilla && <button className="btn-ghost" onClick={descargarPdf}>📥 PDF</button>}
             {guardado
               ? <button className="btn-primary" onClick={onClose}>✓ Cerrar</button>
               : <button className="btn-primary" onClick={guardar} disabled={saving}>{saving?'⏳ Guardando...':'💾 Guardar cambios'}</button>
