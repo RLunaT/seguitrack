@@ -38,6 +38,7 @@ export default function Sidebar() {
   const navFijo = [
     { href: '/', icon: '📊', label: 'Dashboard General' },
     { href: '/gantt', icon: '📅', label: 'Gantt General' },
+    { href: '/reportes', icon: '📋', label: 'Reportes' },
   ]
   const navConfig = [
     { href: '/configuracion', icon: '⚙️', label: 'Configuración' },

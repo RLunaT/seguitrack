@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { calcularCamposOT, calcularCamposConEficiencia, generarSemanas, getNombreOT, fmtMoneda, getEficienciaLabel, generarCodigoOT } from '@/lib/formulas'
 
@@ -62,6 +62,12 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
   const [error, setError]   = useState('')
   const [guardado, setGuardado] = useState(null)
 
+  // Rastrea si el valor actual de doc_codigo_ot fue puesto automáticamente
+  // (por nosotros) o escrito/editado a mano por el usuario. Mientras coincida
+  // con el último valor que generamos, lo seguimos regenerando al cambiar la
+  // semana; en cuanto el usuario lo edita a algo distinto, dejamos de tocarlo.
+  const codigoAutoRef = useRef(null)
+
   const [form, setForm] = useState({
     modulo_id:                modulo.id,
     numero_registro:          '',
@@ -83,11 +89,53 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
 
   const [preview, setPreview] = useState(null)
 
+  // Los campos de "Documento Word" mostraban el texto del módulo solo como
+  // placeholder (gris) cuando datos_extra estaba vacío. Eso hacía que el
+  // usuario creyera que ese texto ya estaba ahí y lo podía editar, pero el
+  // value real era '' — al escribir, el campo pasaba a tener únicamente lo
+  // tipeado. Acá precargamos esos defaults como valor real y editable.
+  function conDefaultsDocExtra(datos_extra, contratistaId) {
+    if (!tienePlantilla) return datos_extra || {}
+    const de  = { ...(datos_extra || {}) }
+    const cId = contratistaId != null ? parseInt(contratistaId) : null
+    const cnt = contratistas.find(c => c.id === cId)
+    const defaults = {
+      doc_titulo:             modulo?.plantilla_titulo || '',
+      doc_cumplimiento:       modulo?.plantilla_cumplimiento || '',
+      doc_actividad:          modulo?.plantilla_actividad || '',
+      doc_editado_por:        modulo?.plantilla_editado_por || '',
+      doc_coordinador:        'CONSORCIO SUPERVISOR',
+      doc_area_usuaria:       'ELECTROPUNO S.A.A',
+      doc_contratista_firma:  cnt?.nombre || '',
+    }
+    for (const k in defaults) {
+      if (de[k] === undefined || de[k] === null || de[k] === '') {
+        if (defaults[k]) de[k] = defaults[k]
+      }
+    }
+    return de
+  }
+
+  // Igual que conDefaultsDocExtra, pero para "Código OT": si el campo está
+  // vacío, lo llenamos con el código autogenerado como valor real (editable),
+  // en vez de dejarlo solo como placeholder. Guardamos ese valor en
+  // codigoAutoRef para poder seguir regenerándolo mientras el usuario no lo
+  // edite a mano.
+  function conCodigoOTSemilla(de, semana) {
+    if (!tienePlantilla) return de
+    if (de.doc_codigo_ot) { codigoAutoRef.current = null; return de }
+    const auto = generarCodigoOT(semana, periodo) || ''
+    if (!auto) return de
+    codigoAutoRef.current = auto
+    return { ...de, doc_codigo_ot: auto }
+  }
+
   useEffect(() => {
     setGuardado(null)
     setStep(1)
     setError('')
     if (ot) {
+      const semanaOt = ot.semana || ''
       setForm({
         modulo_id:                modulo.id,
         numero_registro:          ot.numero_registro || '',
@@ -95,7 +143,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         contratista_id:           ot.contratista_id || '',
         actividad:                ot.actividad || actividades[0] || '',
         motivo_ot:                ot.motivo_ot || motivos[0] || '',
-        semana:                   ot.semana || '',
+        semana:                   semanaOt,
         cantidad_programada:      ot.cantidad_programada || '',
         fecha_inicio:             ot.fecha_inicio || '',
         fecha_fin_trabajos:       ot.fecha_fin_trabajos || '',
@@ -104,10 +152,13 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         cantidad_entregada:       ot.cantidad_entregada ?? '',
         val_penalidades_manual:   ot.val_penalidades_manual || '',
         observaciones:            ot.observaciones || '',
-        datos_extra:              ot.datos_extra || {},
+        datos_extra:              conCodigoOTSemilla(conDefaultsDocExtra(ot.datos_extra, ot.contratista_id), semanaOt),
       })
     } else {
-      setForm(prev => ({ ...prev, numero_registro: String(totalRegistros + 1) }))
+      setForm(prev => {
+        const de = conDefaultsDocExtra(prev.datos_extra, prev.contratista_id)
+        return { ...prev, numero_registro: String(totalRegistros + 1), datos_extra: conCodigoOTSemilla(de, prev.semana) }
+      })
     }
   }, [ot])
 
@@ -161,12 +212,23 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       }
 
       // Si la semana cambia (directo por el selector, o indirecto por fecha_inicio),
-      // se descarta el código OT manual guardado para que se regenere con la
-      // semana nueva — evita que quede "congelado" con una semana vieja (ej. EPU16IP26
-      // cuando la semana real ya es 23).
+      // el código OT se vuelve a generar — pero solo si el usuario no lo
+      // editó a mano (si lo editó, lo respetamos y no lo tocamos).
       if (key === 'semana' || (key === 'fecha_inicio' && val && u.semana !== prev.semana)) {
-        if (u.datos_extra?.doc_codigo_ot) {
-          u.datos_extra = { ...u.datos_extra, doc_codigo_ot: '' }
+        const actual = u.datos_extra?.doc_codigo_ot || ''
+        if (!actual || actual === codigoAutoRef.current) {
+          const nuevoCodigo = generarCodigoOT(u.semana, periodo) || ''
+          codigoAutoRef.current = nuevoCodigo
+          u.datos_extra = { ...u.datos_extra, doc_codigo_ot: nuevoCodigo }
+        }
+      }
+
+      // Al elegir contratista, si el campo "Firma 3 — Contratista" aún está
+      // vacío, se precarga con el nombre real (editable), no solo como placeholder.
+      if (key === 'contratista_id' && val && tienePlantilla && !u.datos_extra?.doc_contratista_firma) {
+        const cnt = contratistas.find(c => c.id === parseInt(val))
+        if (cnt?.nombre) {
+          u.datos_extra = { ...u.datos_extra, doc_contratista_firma: cnt.nombre }
         }
       }
 
@@ -178,6 +240,12 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
     setForm(prev => {
       const de = { ...prev.datos_extra, [key]: val }
       const u  = { ...prev, datos_extra: de }
+      // El usuario está editando el código a mano: dejamos de regenerarlo
+      // automáticamente cuando cambie la semana, salvo que coincida por
+      // casualidad con el último valor que generamos nosotros.
+      if (key === 'doc_codigo_ot' && val !== codigoAutoRef.current) {
+        codigoAutoRef.current = null
+      }
       if (key === 'doc_fecha_entrega' && val && OFFSETS[modulo?.id]) {
         const off    = OFFSETS[modulo.id]
         // Cadena encadenada: Entrega → Inicio → Fin → Límite
@@ -190,9 +258,14 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         const semanaNueva = calcSemana(fInicio)
         u.semana = semanaNueva
         // Misma razón que arriba: si la semana cambió por esta cadena de fechas,
-        // el código OT manual se descarta para regenerarse con la semana correcta.
-        if (semanaNueva !== prev.semana && de.doc_codigo_ot) {
-          u.datos_extra = { ...de, doc_codigo_ot: '' }
+        // el código OT se regenera salvo que el usuario lo haya editado a mano.
+        if (semanaNueva !== prev.semana) {
+          const actual = de.doc_codigo_ot || ''
+          if (!actual || actual === codigoAutoRef.current) {
+            const nuevoCodigo = generarCodigoOT(semanaNueva, periodo) || ''
+            codigoAutoRef.current = nuevoCodigo
+            u.datos_extra = { ...de, doc_codigo_ot: nuevoCodigo }
+          }
         }
       }
       return u
@@ -621,52 +694,52 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Título del documento</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_titulo}
+                      <input className="input-base" placeholder={modulo?.plantilla_titulo} name="p3_doc_titulo" autoComplete="off"
                         value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label>
-                      <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'}
+                      <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} name="p3_doc_codigo_ot" autoComplete="off"
                         value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label>
-                      <input className="input-base" type="number" placeholder="1"
+                      <input className="input-base" type="number" placeholder="1" name="p3_doc_dias_plazo" autoComplete="off"
                         value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_cumplimiento}
+                      <input className="input-base" placeholder={modulo?.plantilla_cumplimiento} name="p3_doc_cumplimiento" autoComplete="off"
                         value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en el doc.</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_actividad}
+                      <input className="input-base" placeholder={modulo?.plantilla_actividad} name="p3_doc_actividad" autoComplete="off"
                         value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_editado_por}
+                      <input className="input-base" placeholder={modulo?.plantilla_editado_por} name="p3_doc_editado_por" autoComplete="off"
                         value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 1 — Coordinador</label>
-                      <input className="input-base" placeholder="CONSORCIO SUPERVISOR"
+                      <input className="input-base" placeholder="CONSORCIO SUPERVISOR" name="p3_doc_coordinador" autoComplete="off"
                         value={form.datos_extra['doc_coordinador']||''} onChange={e=>setExtra('doc_coordinador',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 2 — Área usuaria</label>
-                      <input className="input-base" placeholder="ELECTROPUNO S.A.A"
+                      <input className="input-base" placeholder="ELECTROPUNO S.A.A" name="p3_doc_area_usuaria" autoComplete="off"
                         value={form.datos_extra['doc_area_usuaria']||''} onChange={e=>setExtra('doc_area_usuaria',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 3 — Contratista</label>
-                      <input className="input-base" placeholder={cont?.nombre||'—'}
+                      <input className="input-base" placeholder={cont?.nombre||'—'} name="p3_doc_contratista_firma" autoComplete="off"
                         value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)}/>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 4 <span className="text-gray-600">(si aplica)</span></label>
-                      <input className="input-base" placeholder="Opcional"
+                      <input className="input-base" placeholder="Opcional" name="p3_doc_firma4" autoComplete="off"
                         value={form.datos_extra['doc_firma4']||''} onChange={e=>setExtra('doc_firma4',e.target.value)}/>
                     </div>
                     <div className="col-span-2">
@@ -818,16 +891,16 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                 <section>
                   <h3 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-3">📄 Documento Word</h3>
                   <div className="grid grid-cols-2 gap-3 p-4 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
-                    <div className="col-span-2"><label className="text-xs font-semibold text-gray-400 block mb-1">Título</label><input className="input-base" placeholder={modulo?.plantilla_titulo} value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label><input className="input-base" type="number" placeholder="1" value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label><input className="input-base" placeholder={modulo?.plantilla_cumplimiento} value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en doc.</label><input className="input-base" placeholder={modulo?.plantilla_actividad} value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label><input className="input-base" placeholder={modulo?.plantilla_editado_por} value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 1 — Coordinador</label><input className="input-base" placeholder="CONSORCIO SUPERVISOR" value={form.datos_extra['doc_coordinador']||''} onChange={e=>setExtra('doc_coordinador',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 2 — Área usuaria</label><input className="input-base" placeholder="ELECTROPUNO S.A.A" value={form.datos_extra['doc_area_usuaria']||''} onChange={e=>setExtra('doc_area_usuaria',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 3 — Contratista</label><input className="input-base" placeholder={cont?.nombre||'—'} value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)}/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 4</label><input className="input-base" placeholder="Opcional" value={form.datos_extra['doc_firma4']||''} onChange={e=>setExtra('doc_firma4',e.target.value)}/></div>
+                    <div className="col-span-2"><label className="text-xs font-semibold text-gray-400 block mb-1">Título</label><input className="input-base" placeholder={modulo?.plantilla_titulo} value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)} name="st_doc_titulo" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)} name="st_doc_codigo_ot" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label><input className="input-base" type="number" placeholder="1" value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)} name="st_doc_dias_plazo" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label><input className="input-base" placeholder={modulo?.plantilla_cumplimiento} value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)} name="st_doc_cumplimiento" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en doc.</label><input className="input-base" placeholder={modulo?.plantilla_actividad} value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)} name="st_doc_actividad" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label><input className="input-base" placeholder={modulo?.plantilla_editado_por} value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)} name="st_doc_editado_por" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 1 — Coordinador</label><input className="input-base" placeholder="CONSORCIO SUPERVISOR" value={form.datos_extra['doc_coordinador']||''} onChange={e=>setExtra('doc_coordinador',e.target.value)} name="st_doc_coordinador" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 2 — Área usuaria</label><input className="input-base" placeholder="ELECTROPUNO S.A.A" value={form.datos_extra['doc_area_usuaria']||''} onChange={e=>setExtra('doc_area_usuaria',e.target.value)} name="st_doc_area_usuaria" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 3 — Contratista</label><input className="input-base" placeholder={cont?.nombre||'—'} value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)} name="st_doc_contratista_firma" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 4</label><input className="input-base" placeholder="Opcional" value={form.datos_extra['doc_firma4']||''} onChange={e=>setExtra('doc_firma4',e.target.value)} name="st_doc_firma4" autoComplete="off"/></div>
                   </div>
                 </section>
               )}

@@ -10,7 +10,7 @@ import { exportarExcel, importarExcel } from '@/lib/excel'
 import ModalOT from '@/components/ModalOT'
 import GanttModulo from '@/components/GanttModulo'
 import {
-  getCfg, buildBody, generarHTMLDoc, generarHTMLLote, descargarWord
+  getCfg, buildBody, generarHTMLDoc, descargarWord
 } from './docConfig'
 import { descargarWordTemplate } from './wordGen'
 
@@ -65,13 +65,10 @@ export default function ModuloPage() {
   // Modales
   const [modalCampo, setModalCampo] = useState(false)
   const [modalDoc, setModalDoc] = useState(false)
-  const [modalTodas, setModalTodas] = useState(false)
   const [otParaDoc, setOtParaDoc] = useState(null)
   const [docForm, setDocForm] = useState({})
   const [versionFirma, setVersionFirma] = useState('espacios') // 'sin_firmas' | 'espacios' | 'firmado'
   // Edición en bloque
-  const [loteEditando, setLoteEditando] = useState([])
-  const [tipoLote, setTipoLote] = useState('pdf')
   // Nuevo campo — estilo Excel
   const [nuevoCampo, setNuevoCampo] = useState({ nombre: '', clave: '', tipo: 'texto', opciones: '', obligatorio: false, en_tabla: true, insertarEn: -2 })
 
@@ -559,22 +556,6 @@ export default function ModuloPage() {
   }
 
 
-
-  function abrirLote() {
-    const hoy = new Date().toISOString().slice(0, 10)
-    const formsInit = otsFiltradas.map(ot => {
-      const cont = contratistas.find(c => c.id === ot.contratista_id)
-      return {
-        _id: ot.id, _actividad: ot.actividad, _sel: true,
-        ...buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
-      }
-    })
-    setLoteEditando(formsInit)
-    setTipoLote('pdf')
-    setVersionFirma('espacios')
-    setModalTodas(true)
-  }
-
   if (loading) return (
     <div className="flex flex-col h-full animate-pulse">
       <div className="px-6 py-3 border-b border-gray-800 flex items-center gap-3" style={{background:'#0f172a'}}>
@@ -726,9 +707,6 @@ export default function ModuloPage() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
-          {tienePlantilla && (
-            <button className="btn-ghost text-xs" onClick={abrirLote}>📦 Generar por bloque</button>
-          )}
           <label className="btn-ghost cursor-pointer text-xs">
             {importando ? '⏳...' : '⬆️ Importar Excel'}
             <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} disabled={importando} />
@@ -1284,111 +1262,6 @@ export default function ModuloPage() {
         </div>
       )}
 
-      {/* ── MODAL GENERAR POR BLOQUE — con tabla editable ── */}
-      {modalTodas && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModalTodas(false) }}>
-          <div className="modal-box" style={{ maxWidth: 900 }}>
-            <div className="modal-header">
-              <h2 className="text-base font-bold text-white">🖨️ Generar por bloque</h2>
-              <button onClick={() => setModalTodas(false)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
-            </div>
-            <div className="p-4">
-              {/* Opciones */}
-              <div className="flex flex-wrap gap-4 mb-4 items-center">
-                <div className="flex gap-3">
-                  {[{ v: 'pdf', l: '🖨️ PDF' }, { v: 'word', l: '📝 Word' }].map(({ v, l }) => (
-                    <label key={v} className="flex items-center gap-2 cursor-pointer">
-                      <input type="radio" className="accent-blue-500" checked={tipoLote === v} onChange={() => setTipoLote(v)} />
-                      <span className="text-sm text-gray-200">{l}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="flex gap-3 ml-4 items-center">
-                  {[{v:'espacios',l:'✏️ Espacio para firmar'},{v:'firmado',l:'✍️ Con firmas reales'}].map(({v,l})=>(
-                    <label key={v} className="flex items-center gap-1.5 cursor-pointer">
-                      <input type="radio" className="accent-blue-500" checked={versionFirma===v} onChange={()=>setVersionFirma(v)} />
-                      <span className="text-xs text-gray-200">{l}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="ml-auto flex gap-2">
-                  <button className="btn-ghost text-xs py-1 px-2" onClick={() => setLoteEditando(p => p.map(x => ({ ...x, _sel: true })))}>✅ Todas</button>
-                  <button className="btn-ghost text-xs py-1 px-2" onClick={() => setLoteEditando(p => p.map(x => ({ ...x, _sel: false })))}>☐ Ninguna</button>
-                </div>
-              </div>
-
-              {/* Tabla editable — mismos campos que el modal individual */}
-              <div className="rounded-lg border border-gray-800 overflow-auto" style={{ maxHeight: '52vh' }}>
-                <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 5 }}>
-                    <tr>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800 w-8">✓</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800">Reg.</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:180}}>Título del documento</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:80}}>N° OT</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:100}}>Código OT</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Contrato</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:90}}>Semana</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Entrega OT</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Inicio</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Final</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:110}}>F. Límite</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:60}}>Plazo</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:70}}>Cantidad</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Cumplimiento</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Actividad (doc.)</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Editado por</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Coordinador (f.1)</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:140}}>Área usuaria (f.2)</th>
-                      <th className="px-2 py-2 text-left text-gray-400 border-b border-gray-800" style={{minWidth:160}}>Contratista (f.3)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loteEditando.map((row, i) => (
-                      <tr key={row._id} className={`border-b border-gray-800 ${row._sel ? '' : 'opacity-40'}`}>
-                        <td className="px-2 py-1"><input type="checkbox" className="accent-blue-500" checked={row._sel} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,_sel:e.target.checked}:x))} /></td>
-                        <td className="px-2 py-1 text-gray-300 font-mono">{esOT ? row.numero_ot : row.numero_registro}</td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.titulo||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,titulo:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.numero_ot||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,numero_ot:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.codigo_ot||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,codigo_ot:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.contrato||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,contrato:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.semana||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,semana:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_entrega||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_entrega:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_inicio||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_inicio:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_fin||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_fin:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="date" value={row.fecha_limite||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,fecha_limite:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="number" value={row.dias_plazo||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,dias_plazo:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" type="number" value={row.cantidad||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,cantidad:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.cumplimiento||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,cumplimiento:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.actividad_label||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,actividad_label:e.target.value,actividad_doc:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.editado_por||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,editado_por:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.coordinador||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,coordinador:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.area_usuaria||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,area_usuaria:e.target.value}:x))} /></td>
-                        <td className="px-1 py-1"><input className="input-base py-0.5 text-xs w-full" value={row.contratista_nombre||''} onChange={e=>setLoteEditando(p=>p.map((x,j)=>j===i?{...x,contratista_nombre:e.target.value}:x))} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-                            <div className="mt-2 text-xs text-gray-500">{loteEditando.filter(x => x._sel).length} de {loteEditando.length} seleccionados</div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-ghost" onClick={() => setModalTodas(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={() => {
-                const seleccionadas = loteEditando.filter(x => x._sel)
-                if (seleccionadas.length === 0) { alert('Selecciona al menos un registro.'); return }
-                setModalTodas(false)
-                const actividadesLote = seleccionadas.map(f => f._actividad)
-                if (tipoLote === 'word') {
-                  seleccionadas.forEach((f, idx) => setTimeout(() => descargarWordTemplate(f, actividadesLote[idx]), idx * 800))
-                } else {
-                  window.open(URL.createObjectURL(new Blob([generarHTMLLoteConAPI(seleccionadas, actividadesLote)], { type: 'text/html' })), '_blank')
-                }
-              }}>Generar {loteEditando.filter(x => x._sel).length} documento(s)</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
