@@ -37,41 +37,59 @@ const fmtFecha = f => f
   : '—'
 const fmtNum = n => n != null ? Number(n).toLocaleString('es-PE') : '—'
 
+const fmtMonedaCell = v => (v||0)>0
+  ? `S/ ${Number(v).toLocaleString('es-PE',{minimumFractionDigits:2})}` : '—'
+
 function getCellText(ot, key) {
   switch (key) {
-    case 'modulo':              return ot.modulo_nombre || '—'
-    case 'contratista':         return ot.contratista_nombre || '—'
-    case 'fecha_inicio':        return fmtFecha(ot.fecha_inicio)
-    case 'fecha_fin_trabajos':  return fmtFecha(ot.fecha_fin_trabajos)
-    case 'fecha_limite':        return fmtFecha(ot.fecha_limite)
-    case 'cantidad_programada': return fmtNum(ot.cantidad_programada)
-    case 'cantidad_entregada':  return fmtNum(ot.cantidad_entregada)
-    case 'dias_fuera_plazo':    return (ot.dias_fuera_plazo || 0) > 0 ? `${ot.dias_fuera_plazo} días` : '—'
-    case 'val_total_penalidad': return (ot.val_total_penalidad || 0) > 0
-      ? `S/ ${Number(ot.val_total_penalidad).toLocaleString('es-PE',{minimumFractionDigits:2})}` : '—'
-    case 'progreso':            return ot.progreso != null
-      ? `${Math.round(ot.progreso * 100)}%` : '—'
-    default:                    return String(ot[key] ?? '—')
+    case 'modulo':                 return ot.modulo_nombre || '—'
+    case 'contratista':            return ot.contratista_nombre || '—'
+    case 'contrato':               return ot.contrato || '—'
+    case 'nombre_ot':              return ot.nombre_ot || '—'
+    case 'motivo_ot':              return ot.motivo_ot || '—'
+    case 'periodo':                return ot.periodo || '—'
+    case 'fecha_inicio':           return fmtFecha(ot.fecha_inicio)
+    case 'fecha_fin_trabajos':     return fmtFecha(ot.fecha_fin_trabajos)
+    case 'fecha_limite':           return fmtFecha(ot.fecha_limite)
+    case 'fecha_reporte':          return ot.fecha_reporte ? fmtFecha(ot.fecha_reporte) : '—'
+    case 'cantidad_programada':    return fmtNum(ot.cantidad_programada)
+    case 'cantidad_entregada':     return ot.cantidad_entregada != null ? fmtNum(ot.cantidad_entregada) : '—'
+    case 'dias_fuera_plazo':       return (ot.dias_fuera_plazo || 0) > 0 ? `${ot.dias_fuera_plazo} días` : '—'
+    case 'val_penalidades_manual': return fmtMonedaCell(ot.val_penalidades_manual)
+    case 'val_total_penalidad':    return fmtMonedaCell(ot.val_total_penalidad)
+    case 'progreso':               return ot.progreso != null ? `${Math.round(ot.progreso * 100)}%` : '—'
+    case 'fecha_entrega_ot':       return fmtFecha(ot.fecha_entrega_ot)
+    case 'eficiencia':             return ot.eficiencia != null ? `${Math.round((ot.eficiencia||0)*100)}%` : '—'
+    case 'observaciones':          return ot.observaciones ? String(ot.observaciones).slice(0,120) : '—'
+    default:                       return String(ot[key] ?? '—')
   }
 }
 
 const COLS_META = {
-  numero_ot:           { label: 'N° OT',         width: 42,  align: 'center' },
-  modulo:              { label: 'Módulo',         width: 100, align: 'left'   },
-  contratista:         { label: 'Contratista',    width: 125, align: 'left'   },
-  actividad:           { label: 'Actividad',      width: 90,  align: 'left'   },
-  semana:              { label: 'Semana',         width: 60,  align: 'center' },
-  fecha_inicio:        { label: 'F. Inicio',      width: 72,  align: 'center' },
-  fecha_fin_trabajos:  { label: 'F. Fin',         width: 72,  align: 'center' },
-  fecha_limite:        { label: 'F. Límite Exp.', width: 80,  align: 'center' },
-  cantidad_programada: { label: 'Cant. Prog.',    width: 60,  align: 'right'  },
-  cantidad_entregada:  { label: 'Cant. Ent.',     width: 60,  align: 'right'  },
-  dias_plazo:          { label: 'Plazo',          width: 44,  align: 'center' },
-  duracion_real:       { label: 'Dur. Real',      width: 52,  align: 'center' },
-  dias_fuera_plazo:    { label: 'Días Fuera',     width: 60,  align: 'center' },
-  val_total_penalidad: { label: 'Penalidad',      width: 78,  align: 'right'  },
-  estado:              { label: 'Estado',         width: 95,  align: 'center' },
-  progreso:            { label: 'Progreso',       width: 52,  align: 'center' },
+  numero_ot:              { label: 'N° OT',           width: 42,  align: 'center' },
+  modulo:                 { label: 'Módulo',           width: 100, align: 'left'   },
+  contratista:            { label: 'Contratista',      width: 125, align: 'left'   },
+  contrato:               { label: 'N° Contrato',      width: 110, align: 'left'   },
+  actividad:              { label: 'Actividad',        width: 90,  align: 'left'   },
+  motivo_ot:              { label: 'Motivo',           width: 70,  align: 'center' },
+  periodo:                { label: 'Período',          width: 55,  align: 'center' },
+  semana:                 { label: 'Semana',           width: 60,  align: 'center' },
+  fecha_inicio:           { label: 'F. Inicio',        width: 72,  align: 'center' },
+  fecha_fin_trabajos:     { label: 'F. Fin',           width: 72,  align: 'center' },
+  fecha_limite:           { label: 'F. Límite Exp.',   width: 80,  align: 'center' },
+  fecha_reporte:          { label: 'F. Reporte',       width: 72,  align: 'center' },
+  cantidad_programada:    { label: 'Cant. Prog.',      width: 60,  align: 'right'  },
+  cantidad_entregada:     { label: 'Cant. Ent.',       width: 60,  align: 'right'  },
+  dias_plazo:             { label: 'Plazo',            width: 44,  align: 'center' },
+  duracion_real:          { label: 'Dur. Real',        width: 52,  align: 'center' },
+  dias_fuera_plazo:       { label: 'Días Fuera',       width: 60,  align: 'center' },
+  val_penalidades_manual: { label: 'Pen. Manual',      width: 70,  align: 'right'  },
+  val_total_penalidad:    { label: 'Penalidad Total',  width: 78,  align: 'right'  },
+  estado:                 { label: 'Estado',           width: 95,  align: 'center' },
+  progreso:               { label: 'Progreso',         width: 52,  align: 'center' },
+  fecha_entrega_ot:       { label: 'F. Entrega OT',    width: 72,  align: 'center' },
+  eficiencia:             { label: 'Eficiencia',       width: 55,  align: 'center' },
+  observaciones:          { label: 'Observaciones',    width: 140, align: 'left'   },
 }
 
 // Dibujar texto recortado con elipsis
@@ -99,7 +117,7 @@ export async function POST(request) {
     const { titulo, subtitulo, filtros, columnas: colKeys, ots, agruparPor, totalesReporte } = await request.json()
 
     if (!ots?.length)
-      return NextResponse.json({ error: 'Sin datos' }, { status: 400 })
+      return NextResponse.json({ error: 'No hay órdenes de trabajo para generar el reporte.' }, { status: 400 })
 
     // ── Página A4 landscape ────────────────────────────────────
     const PW = 841.89
@@ -245,7 +263,7 @@ export async function POST(request) {
 
           // Dato 1: OTs fuera de plazo
           const x1 = ML + 20
-          page.drawText('OTs fuera de plazo', { x:x1, y:yPos-14, size:8, font:fontReg, color:C.grisTexto })
+          page.drawText('OTs con días fuera de plazo', { x:x1, y:yPos-14, size:8, font:fontReg, color:C.grisTexto })
           page.drawText(String(totalesReporte.fueraPlazo), { x:x1, y:yPos-34, size:22, font:fontBold, color:C.rojo })
           page.drawText('en la selección actual', { x:x1 + fontBold.widthOfTextAtSize(String(totalesReporte.fueraPlazo), 22) + 6,
             y:yPos-36, size:7.5, font:fontItal, color:C.grisTexto })

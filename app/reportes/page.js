@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { calcularCamposOT } from '@/lib/formulas'
+import { calcularCamposConEficiencia, getEficienciaLabel } from '@/lib/formulas'
 
 const ESTADO_COLORS = {
   1:{bg:'#14532d',text:'#4ade80',label:'Cumplió a tiempo'},
@@ -14,22 +14,30 @@ const ESTADO_COLORS = {
 
 // Orden canónico — siempre se respeta, sin importar cuándo se seleccione
 const COLUMNAS = [
-  {key:'numero_ot',           label:'N° OT'},
-  {key:'modulo',              label:'Módulo'},
-  {key:'contratista',         label:'Contratista'},
-  {key:'actividad',           label:'Actividad'},
-  {key:'semana',              label:'Semana'},
-  {key:'fecha_inicio',        label:'F. Inicio'},
-  {key:'fecha_fin_trabajos',  label:'F. Fin Trabajos'},
-  {key:'fecha_limite',        label:'F. Límite Exp.'},
-  {key:'cantidad_programada', label:'Cant. Prog.'},
-  {key:'cantidad_entregada',  label:'Cant. Entregada'},
-  {key:'dias_plazo',          label:'Plazo (días)'},
-  {key:'duracion_real',       label:'Duración Real'},
-  {key:'dias_fuera_plazo',    label:'Días Fuera Plazo'},
-  {key:'val_total_penalidad', label:'Penalidad'},
-  {key:'estado',              label:'Estado'},
-  {key:'progreso',            label:'Progreso'},
+  {key:'numero_ot',              label:'N° OT'},
+  {key:'modulo',                 label:'Módulo'},
+  {key:'contratista',            label:'Contratista'},
+  {key:'actividad',              label:'Actividad'},
+  {key:'motivo_ot',              label:'Motivo'},
+  {key:'semana',                 label:'Semana'},
+  {key:'periodo',                label:'Período'},
+  {key:'contrato',               label:'N° Contrato'},
+  {key:'progreso',               label:'Progreso'},
+  {key:'fecha_entrega_ot',       label:'F. Entrega OT'},
+  {key:'fecha_inicio',           label:'F. Inicio'},
+  {key:'fecha_fin_trabajos',     label:'F. Fin Trabajos'},
+  {key:'fecha_limite',           label:'F. Límite Exp.'},
+  {key:'dias_plazo',             label:'Plazo (días)'},
+  {key:'cantidad_programada',    label:'Cant. Prog.'},
+  {key:'fecha_reporte',          label:'F. Reporte'},
+  {key:'cantidad_entregada',     label:'Cant. Entregada'},
+  {key:'estado',                 label:'Estado'},
+  {key:'duracion_real',          label:'Duración Real'},
+  {key:'dias_fuera_plazo',       label:'Días Fuera Plazo'},
+  {key:'val_penalidades_manual', label:'Penalidad Manual'},
+  {key:'val_total_penalidad',    label:'Penalidad Total'},
+  {key:'observaciones',          label:'Observaciones'},
+  {key:'eficiencia',             label:'Eficiencia'},
 ]
 
 const fmtFecha  = f => f ? new Date(f+'T00:00:00').toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—'
@@ -111,7 +119,7 @@ export default function ReportesPage() {
 
   const otsE = useMemo(()=>ots.map(ot=>{
     const contratista   = contratistas.find(c=>c.id===ot.contratista_id)
-    const calculados    = calcularCamposOT(ot, contratista)   // recalcula estado, dias_fuera, penalidad
+    const calculados    = calcularCamposConEficiencia(ot, contratista)   // recalcula estado, dias_fuera, penalidad, eficiencia
     return {
       ...ot,
       ...calculados,                                           // sobreescribe los valores del DB con los recalculados
@@ -168,18 +176,27 @@ export default function ReportesPage() {
 
   function getCellValue(ot,key){
     switch(key){
-      case 'modulo':              return `${ot.modulo_icono} ${ot.modulo_nombre}`
-      case 'contratista':         return ot.contratista_nombre
-      case 'fecha_inicio':        return fmtFecha(ot.fecha_inicio)
-      case 'fecha_fin_trabajos':  return fmtFecha(ot.fecha_fin_trabajos)
-      case 'fecha_limite':        return fmtFecha(ot.fecha_limite_expedientes)
-      case 'cantidad_programada': return fmtNum(ot.cantidad_programada)
-      case 'cantidad_entregada':  return fmtNum(ot.cantidad_entregada)
-      case 'val_total_penalidad': return fmtMoneda(ot.val_total_penalidad)
-      case 'dias_fuera_plazo':    return (ot.dias_fuera_plazo||0)>0?`${ot.dias_fuera_plazo} días`:'—'
-      case 'estado':              return null
-      case 'progreso':            return ot.progreso!=null?`${Math.round(ot.progreso*100)}%`:'—'
-      default:                    return ot[key]??'—'
+      case 'modulo':                 return `${ot.modulo_icono} ${ot.modulo_nombre}`
+      case 'contratista':            return ot.contratista_nombre
+      case 'contrato':               return ot.contrato||'—'
+      case 'nombre_ot':              return ot.nombre_ot||'—'
+      case 'motivo_ot':              return ot.motivo_ot||'—'
+      case 'periodo':                return ot.periodo||'—'
+      case 'fecha_inicio':           return fmtFecha(ot.fecha_inicio)
+      case 'fecha_fin_trabajos':     return fmtFecha(ot.fecha_fin_trabajos)
+      case 'fecha_limite':           return fmtFecha(ot.fecha_limite_expedientes)
+      case 'fecha_reporte':          return ot.fecha_reporte ? fmtFecha(ot.fecha_reporte) : '—'
+      case 'cantidad_programada':    return fmtNum(ot.cantidad_programada)
+      case 'cantidad_entregada':     return ot.cantidad_entregada!=null ? fmtNum(ot.cantidad_entregada) : '—'
+      case 'val_penalidades_manual': return (ot.val_penalidades_manual||0)>0 ? fmtMoneda(ot.val_penalidades_manual) : '—'
+      case 'val_total_penalidad':    return fmtMoneda(ot.val_total_penalidad)
+      case 'dias_fuera_plazo':       return (ot.dias_fuera_plazo||0)>0?`${ot.dias_fuera_plazo} días`:'—'
+      case 'estado':                 return null
+      case 'progreso':               return ot.progreso!=null?`${Math.round(ot.progreso*100)}%`:'—'
+      case 'fecha_entrega_ot':       return fmtFecha(ot.fecha_entrega_ot)
+      case 'eficiencia':             return ot.eficiencia!=null?`${Math.round((ot.eficiencia||0)*100)}%`:'—'
+      case 'observaciones':          return ot.observaciones ? (typeof ot.observaciones==='string' ? ot.observaciones : JSON.stringify(ot.observaciones)) : '—'
+      default:                       return ot[key]??'—'
     }
   }
 
@@ -195,6 +212,11 @@ export default function ReportesPage() {
   },[otsFiltradas,agruparPor])
 
   async function generarPDF(){
+    // Guarda extra: no llamar al API si no hay datos
+    if (!otsFiltradas.length) {
+      alert('No hay órdenes de trabajo para generar el reporte. Verificá los filtros.')
+      return
+    }
     setGenerando(true)
     try {
       const fa={}
@@ -212,13 +234,32 @@ export default function ReportesPage() {
           subtitulo:[fa.modulo,fa.contratista].filter(Boolean).join(' · ')||null,
           filtros:fa, columnas:colsVisibles.map(c=>c.key), agruparPor, totalesReporte,
           ots:otsFiltradas.map(ot=>({
-            numero_ot:ot.numero_ot,modulo_nombre:ot.modulo_nombre,modulo_icono:ot.modulo_icono,
-            contratista_nombre:ot.contratista_nombre,actividad:ot.actividad,semana:ot.semana,
-            fecha_inicio:ot.fecha_inicio,fecha_fin_trabajos:ot.fecha_fin_trabajos,
-            fecha_limite:ot.fecha_limite_expedientes,cantidad_programada:ot.cantidad_programada,
-            cantidad_entregada:ot.cantidad_entregada,dias_plazo:ot.dias_plazo,
-            duracion_real:ot.duracion_real,dias_fuera_plazo:ot.dias_fuera_plazo,
-            val_total_penalidad:ot.val_total_penalidad,estado:ot.estado,progreso:ot.progreso,
+            numero_ot:              ot.numero_ot,
+            nombre_ot:              ot.nombre_ot,
+            modulo_nombre:          ot.modulo_nombre,
+            modulo_icono:           ot.modulo_icono,
+            contratista_nombre:     ot.contratista_nombre,
+            contrato:               ot.contrato,
+            actividad:              ot.actividad,
+            motivo_ot:              ot.motivo_ot,
+            periodo:                ot.periodo,
+            semana:                 ot.semana,
+            fecha_inicio:           ot.fecha_inicio,
+            fecha_fin_trabajos:     ot.fecha_fin_trabajos,
+            fecha_limite:           ot.fecha_limite_expedientes,
+            fecha_reporte:          ot.fecha_reporte,
+            cantidad_programada:    ot.cantidad_programada,
+            cantidad_entregada:     ot.cantidad_entregada,
+            dias_plazo:             ot.dias_plazo,
+            duracion_real:          ot.duracion_real,
+            dias_fuera_plazo:       ot.dias_fuera_plazo,
+            val_penalidades_manual: ot.val_penalidades_manual,
+            val_total_penalidad:    ot.val_total_penalidad,
+            estado:                 ot.estado,
+            progreso:               ot.progreso,
+            fecha_entrega_ot:       ot.datos_extra?.doc_fecha_entrega||null,
+            eficiencia:             ot.eficiencia,
+            observaciones:          typeof ot.observaciones==='string' ? ot.observaciones : (ot.observaciones ? JSON.stringify(ot.observaciones) : null),
           })),
         })
       })
@@ -228,7 +269,12 @@ export default function ReportesPage() {
       const a=document.createElement('a'); a.href=url; a.download=`Reporte_OTs_${new Date().toISOString().slice(0,10)}.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(()=>URL.revokeObjectURL(url),3000)
-    } catch(e){ alert('Error: '+e.message) }
+    } catch(e){
+      const msg = e.message?.startsWith('{')
+        ? (JSON.parse(e.message)?.error || e.message)
+        : e.message
+      alert('Error al generar el reporte: ' + msg)
+    }
     finally{ setGenerando(false) }
   }
 

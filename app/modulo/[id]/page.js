@@ -24,6 +24,7 @@ const CAMPOS_BASE = [
   { key: 'semana',             label: 'Semana',          always: false },
   { key: 'contrato',           label: 'Contrato',        always: false },
   { key: 'progreso',           label: 'Progreso',        always: false },
+  { key: 'fecha_entrega_ot',   label: 'F. Entrega OT',   always: false },
   { key: 'fecha_inicio',       label: 'F. Inicio',       always: false },
   { key: 'fecha_fin_trabajos', label: 'F. Fin',          always: false },
   { key: 'fecha_limite',       label: 'F. Límite',       always: true  },
@@ -207,7 +208,7 @@ export default function ModuloPage() {
     if (key === 'contratista')     return 150
     if (key === 'observaciones')   return 180
     if (key === 'estado')          return 190
-    if (['fecha_inicio','fecha_limite','fecha_reporte','fecha_fin_trabajos'].includes(key)) return 100
+    if (['fecha_inicio','fecha_limite','fecha_reporte','fecha_fin_trabajos','fecha_entrega_ot'].includes(key)) return 100
     if (key === 'progreso')        return 110
     if (['val_pen','val_total'].includes(key)) return 90
     if (['cantidad','cantidad_entregada'].includes(key)) return 100
@@ -612,6 +613,10 @@ export default function ModuloPage() {
         if (k === 'numero_registro' || k === 'acciones') return
         if (baseKeys.has(k)) {
           if (isColVisible(k) && baseColMap[k]) result.push(baseColMap[k])
+          // Si esta es progreso, inyectar fecha_entrega_ot justo después si aplica
+          if (k === 'progreso' && nuevasBase.find(c => c.key === 'fecha_entrega_ot')) {
+            result.push({ key: 'fecha_entrega_ot', label: 'F. Entrega OT' })
+          }
           // Si esta es fecha_reporte, inyectar cantidad_entregada justo después si aplica
           if (k === 'fecha_reporte' && nuevasBase.find(c => c.key === 'cantidad_entregada')) {
             result.push({ key: 'cantidad_entregada', label: 'Cant. Entregada' })
@@ -892,6 +897,7 @@ export default function ModuloPage() {
                             if (k === 'fecha_inicio') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_inicio)}</td>
                             if (k === 'fecha_fin_trabajos') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_fin_trabajos)}</td>
                             if (k === 'fecha_limite') return <td key={k} className="font-mono text-xs font-semibold">{fmtFecha(ot.fecha_limite_expedientes)}</td>
+                            if (k === 'fecha_entrega_ot') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.datos_extra?.doc_fecha_entrega)}</td>
                             if (k === 'dias_plazo') return <td key={k} className="text-center font-mono text-xs">{ot.dias_plazo??'—'}</td>
                             if (k === 'cantidad') return <td key={k} className="text-center text-xs">{ot.cantidad_programada??'—'}</td>
                             if (k === 'cantidad_entregada') {
