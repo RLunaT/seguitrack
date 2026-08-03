@@ -1055,6 +1055,8 @@ export default function DashboardPage() {
         con_reporte: mk(arr,o=>!!o.fecha_reporte),
         pen_total:   arr.reduce((s,o)=>s+(o.val_total_penalidad||0),0),
         efic_prom:   con_efic.length>0 ? Math.round(con_efic.reduce((s,o)=>s+(o.eficiencia||0),0)/con_efic.length) : null,
+        cant_prog:   arr.reduce((s,o)=>s+(o.cantidad_programada||0),0),
+        cant_entr:   arr.reduce((s,o)=>s+(o.cantidad_entregada||0),0),
       }
     }
 
@@ -1177,6 +1179,8 @@ export default function DashboardPage() {
         con_reporte: mk(arr,o=>!!o.fecha_reporte),
         pen_total:   arr.reduce((s,o)=>s+(o.val_total_penalidad||0),0),
         efic_prom:   con_efic.length>0 ? Math.round(con_efic.reduce((s,o)=>s+(o.eficiencia||0),0)/con_efic.length) : null,
+        cant_prog:   arr.reduce((s,o)=>s+(o.cantidad_programada||0),0),
+        cant_entr:   arr.reduce((s,o)=>s+(o.cantidad_entregada||0),0),
       }
     }
 
@@ -1519,6 +1523,29 @@ export default function DashboardPage() {
           <KpiCard label="Fuera de plazo" value={global.fuera} color="#ef4444" icon="❌" sub="sin reporte, plazo vencido" tooltip="Registros que superaron la fecha límite sin haber sido reportados. Generan penalidades."/>
           {global.pen_total>0&&<KpiCard label="Penalidades" value={fmtMoneda(global.pen_total)} color="#f43f5e" icon="💰" sub="acumulado en todos los módulos" small tooltip="Total de penalidades acumuladas por retrasos en todos los módulos."/>}
           {global.efic_prom!==null&&(()=>{const ei=getEficienciaLabel(global.efic_prom);return<KpiCard label="Eficiencia global" value={`${global.efic_prom}%`} color={ei.color} icon="📈" sub={ei.label} small tooltip={<><div className="font-bold text-white mb-1">Eficiencia global promedio</div><div className="text-gray-400">Promedio ponderado entre cumplimiento de cantidades y plazos. Nota: {ei.grade}</div></>}/>})()}
+
+        {/* ── KPIs de CANTIDADES ── */}
+        {(global.cant_prog > 0) && (<>
+          <div className="col-span-full mt-1 mb-0">
+            <div className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
+              <div className="flex-1 h-px bg-gray-800"/>
+              <span>📦 Avance por Cantidades</span>
+              <div className="flex-1 h-px bg-gray-800"/>
+            </div>
+          </div>
+          <KpiCard label="Cant. Programada" value={global.cant_prog.toLocaleString('es-PE')} color="#3b82f6" icon="📋" sub="total programado" tooltip="Suma de todas las cantidades programadas en las OTs del período."/>
+          <KpiCard label="Cant. Entregada" value={global.cant_entr.toLocaleString('es-PE')} color="#22c55e" icon="📦" sub="total entregado" tooltip="Suma de todas las cantidades efectivamente entregadas en el período."/>
+          {(()=>{
+            const pct = global.cant_prog>0 ? Math.round(global.cant_entr/global.cant_prog*100) : 0
+            const color = pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444'
+            return <KpiCard label="Avance" value={`${pct}%`} color={color} icon="📊"
+              pct={pct} sub={`${global.cant_entr.toLocaleString('es-PE')} / ${global.cant_prog.toLocaleString('es-PE')}`}
+              tooltip="Porcentaje de avance: cantidad entregada respecto a la programada."/>
+          })()}
+          {global.cant_prog > global.cant_entr && (
+            <KpiCard label="Pendiente" value={(global.cant_prog-global.cant_entr).toLocaleString('es-PE')} color="#f59e0b" icon="⏳" sub="unidades por entregar" tooltip="Diferencia entre lo programado y lo entregado hasta la fecha."/>
+          )}
+        </>)}
         </div>
 
         {/* Donut + Estado por módulo */}
@@ -1788,6 +1815,42 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* ── AVANCE POR CANTIDADES POR MÓDULO ── */}
+        {xModulo.some(m=>(m.cant_prog||0)>0) && (
+          <div className="card">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-base">📦</span>
+              <span className="text-sm font-bold text-white">Avance por Cantidades</span>
+              <span className="text-xs text-gray-500">· por módulo</span>
+            </div>
+            <div className="space-y-4">
+              {xModulo.filter(m=>(m.cant_prog||0)>0).map(mod => {
+                const pct = Math.round((mod.cant_entr||0)/(mod.cant_prog||1)*100)
+                const color = pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444'
+                const pendiente = (mod.cant_prog||0)-(mod.cant_entr||0)
+                return (
+                  <div key={mod.id}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span>{mod.icono}</span>
+                        <span className="text-xs font-semibold text-gray-200">{mod.nombre}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs font-mono">
+                        <span className="text-gray-500">{(mod.cant_entr||0).toLocaleString('es-PE')} / {(mod.cant_prog||0).toLocaleString('es-PE')}</span>
+                        <span className="font-bold" style={{color}}>{pct}%</span>
+                      </div>
+                    </div>
+                    <div className="w-full h-3 rounded-full" style={{background:'#1e293b'}}>
+                      <div className="h-3 rounded-full transition-all duration-500" style={{width:`${Math.min(100,pct)}%`,background:color}}/>
+                    </div>
+                    {pendiente>0&&<div className="text-xs text-gray-600 mt-0.5 text-right">{pendiente.toLocaleString('es-PE')} pendientes</div>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Semanas + Urgentes */}
         <div className="grid gap-4" style={{gridTemplateColumns:'1fr 340px'}}>
