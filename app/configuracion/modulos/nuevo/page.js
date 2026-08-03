@@ -1,7 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useRouter, useSearchParams, Suspense } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 const ICONOS = ['📋','⚡','🔄','🆕','📄','📁','🔍','🏗️','🔧','📊','📅','🎯','⚠️','✅','🔔','🌐','📢','🏛️','📌','🗂️']
 const COLORES = ['#3b82f6','#22c55e','#eab308','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#a855f7','#2E75B6','#70AD47']
