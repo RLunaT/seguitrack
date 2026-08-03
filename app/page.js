@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   calcularCamposOT, getEstadoInfo, getDiasRestantes,
@@ -14,6 +14,86 @@ const ESTADO_LABELS = { 1:'Cumplió a tiempo', 2:'Cumplió tarde', 3:'En proceso
 function Tooltip({ children, content, block=false }) {
   const [show, setShow] = useState(false)
   const [pos, setPos]   = useState({ x: 0, y: 0 })
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <div style={{display: block ? 'block' : 'inline-block'}} onMouseEnter={e=>{setShow(true);setPos({x:e.clientX,y:e.clientY})}} onMouseLeave={()=>setShow(false)} onMouseMove={e=>setPos({x:e.clientX,y:e.clientY})}>
       {children}
@@ -37,6 +117,86 @@ function Donut({ segs, size=120, grosor=22, centro }) {
   let off=0
   const arcos=segs.filter(s=>s.n>0).map(s=>{const pct=s.n/total,dash=pct*circ,el={...s,dash,gap:circ-dash,offset:off*circ,pct:Math.round(pct*100)};off+=pct;return el})
   const hovInfo = hov!==null ? arcos[hov] : null
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <div className="relative flex-shrink-0" style={{width:size,height:size}}>
       <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
@@ -65,6 +225,86 @@ function Donut({ segs, size=120, grosor=22, centro }) {
 function Bar({ segs, total, h=7, showTooltip=true }) {
   const [hov, setHov] = useState(null)
   if(!total) return <div style={{height:h,background:'#1f2937',borderRadius:h/2}}/>
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <div style={{position:'relative'}}>
       <div style={{height:h,background:'#1f2937',borderRadius:h/2,overflow:'hidden',display:'flex'}}>
@@ -80,6 +320,86 @@ function Bar({ segs, total, h=7, showTooltip=true }) {
 
 // ── KPI Card ───────────────────────────────────────────────────
 function KpiCard({ label, value, color, sub, icon, pct, small, tooltip }) {
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <Tooltip content={tooltip}>
       <div className="card h-full" style={{borderTop:`2px solid ${color}`,padding:'12px 14px',cursor:tooltip?'help':'default'}}>
@@ -109,6 +429,86 @@ function KpiCard({ label, value, color, sub, icon, pct, small, tooltip }) {
 function EficBar({ valor, label, max=100 }) {
   const ei = getEficienciaLabel(valor)
   const w  = valor !== null ? Math.round((valor/max)*100) : 0
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <Tooltip content={<><div className="font-bold" style={{color:ei.color}}>{ei.label} — {valor ?? '—'}%</div><div className="text-gray-400 mt-1">{label}</div><div className="text-gray-500 mt-0.5 text-xs">Nota: {ei.grade}</div></>}>
       <div className="flex items-center gap-2 cursor-help">
@@ -128,6 +528,86 @@ function EficBar({ valor, label, max=100 }) {
 
 // ── Leyenda ────────────────────────────────────────────────────
 function Leyenda({ items }) {
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <div className="flex gap-3 flex-wrap">
       {items.map(([l,c])=>(
@@ -156,7 +636,87 @@ function SemanaChart({ data }) {
   useEffect(() => {
     if (ready) return
     const t = setInterval(() => { if (window.Chart) { setReady(true); clearInterval(t) } }, 50)
-    return () => clearInterval(t)
+    // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return () => clearInterval(t)
   }, [ready])
 
   useEffect(() => {
@@ -232,7 +792,87 @@ function SemanaChart({ data }) {
         layout: { padding: { top: 8 } }
       }
     })
-    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
+    // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
   }, [data, ready])
 
   if (!data || data.length === 0) return (
@@ -241,6 +881,86 @@ function SemanaChart({ data }) {
       <div className="text-xs">Sin datos por semana</div>
     </div>
   )
+
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
 
   return (
     <div>
@@ -266,17 +986,53 @@ export default function DashboardPage() {
   const [loading, setLoading]     = useState(true)
   const [periodo, setPeriodo]     = useState('2026-I')
   const [modActivo, setModActivo] = useState('general')
+  const [metas, setMetas]         = useState([])
+  const [modalMeta, setModalMeta] = useState(null) // { modulo_id, modulo_nombre, periodo }
+  const [metaForm, setMetaForm]   = useState({ semestral:'', anual:'', mensual:'', semanal:'' })
+  const [guardandoMeta, setGuardandoMeta] = useState(false)
+  const [verPor, setVerPor]               = useState('semestral')
+  const [periodoSelec, setPeriodoSelec]   = useState('')
+  const [anioSelec, setAnioSelec]         = useState('')
+  const [mesSelec, setMesSelec]           = useState('')
+  const [semanaSelec, setSemanaSelec]     = useState('')
+
+  const [rawOts,      setRawOts]      = useState([])
+  const [rawModulos,  setRawModulos]  = useState([])
+  const [rawConts,    setRawConts]    = useState([])
+  const [periodosList, setPeriodosList] = useState([])
 
   const cargar = useCallback(async () => {
     setLoading(true)
-    const [{ data: ots }, { data: modulos }, { data: conts }, { data: cfg }] = await Promise.all([
+    const [{ data: ots }, { data: modulos }, { data: conts }, { data: cfg }, { data: metasData }] = await Promise.all([
       supabase.from('ots').select('*').order('fecha_limite_expedientes'),
       supabase.from('modulos').select('*').eq('activo', true).order('orden'),
       supabase.from('contratistas').select('*').eq('activo', true),
       supabase.from('config_global').select('*'),
+      supabase.from('metas').select('*'),
     ])
+    setMetas(metasData || [])
     const p = cfg?.find(c=>c.clave==='periodo')?.valor || '2026-I'
     setPeriodo(p)
+
+    // Cargar lista autorizada de períodos desde config_global
+    const pLista = cfg?.find(c=>c.clave==='periodos_lista')?.valor || ''
+    const pArr   = pLista ? pLista.split(',').map(x=>x.trim()).filter(Boolean) : []
+    const pDeOts = [...new Set((ots||[]).map(o=>o.periodo).filter(Boolean))]
+    const todosPeriodos = [...new Set([...pArr, ...pDeOts])].sort((a,b) => {
+      const parse = s => { const m = String(s).match(/^(\d{4})-(I{1,2})$/); return m ? [+m[1], m[2]==='II'?2:1] : [0,0] }
+      const [ya,sa] = parse(a), [yb,sb] = parse(b)
+      return yb !== ya ? yb - ya : sb - sa
+    })
+    setPeriodosList(todosPeriodos)
+
+    // Auto-seleccionar el período más reciente que tenga OTs
+    const periodoConOts = todosPeriodos.find(per => (ots||[]).some(o => o.periodo === per))
+    setPeriodoSelec(periodoConOts || p)
+
+    // Guardar datos crudos para recalcular al cambiar período
+    setRawOts(ots || [])
+    setRawModulos(modulos || [])
+    setRawConts(conts || [])
 
     const otsCalc = (ots||[]).map(ot => {
       const cont = (conts||[]).find(c=>c.id===ot.contratista_id)
@@ -366,9 +1122,120 @@ export default function DashboardPage() {
       if(o.estado===5) xSemG[o.semana].fuera++
     })
 
-    setDatos({ global, xModulo, urgentes, xSemG:Object.entries(xSemG).sort(([a],[b])=>a.localeCompare(b)).slice(-12) })
+    setDatos({ global, xModulo, urgentes, xSemG:Object.entries(xSemG).sort(([a],[b])=>a.localeCompare(b)).slice(-12), otsCalcAll: otsCalc })
     setLoading(false)
   }, [])
+
+  // Recalcular stats cuando cambia el período seleccionado
+  const datosActivos = useMemo(() => {
+    if (!datos) return null
+    const otsAll = datos.otsCalcAll || []
+    let otsFilt  = [...otsAll]
+
+    if (verPor === 'semestral') {
+      // Filtra por período (2026-I o 2026-II)
+      const p = periodoSelec || periodo
+      otsFilt = otsAll.filter(o => o.periodo === p)
+
+    } else if (verPor === 'anual') {
+      // Filtra por año — incluye todos los semestres del año
+      const anio = anioSelec || (periodoSelec || periodo)?.split('-')[0] || ''
+      otsFilt = anio ? otsAll.filter(o => (o.periodo||'').startsWith(anio)) : otsAll
+
+    } else if (verPor === 'mensual') {
+      // Filtra por período + mes (fecha_inicio en ese mes)
+      const p = periodoSelec || periodo
+      const mes = mesSelec // formato YYYY-MM
+      otsFilt = otsAll.filter(o => {
+        const matchPer = !p || o.periodo === p
+        const matchMes = !mes || (o.fecha_inicio && o.fecha_inicio.startsWith(mes))
+        return matchPer && matchMes
+      })
+
+    } else if (verPor === 'semanal') {
+      // Filtra por período + semana
+      const p = periodoSelec || periodo
+      const sem = semanaSelec
+      otsFilt = otsAll.filter(o => {
+        const matchPer = !p || o.periodo === p
+        const matchSem = !sem || o.semana === sem
+        return matchPer && matchSem
+      })
+    }
+
+    const mk = (arr,fn) => arr.filter(fn).length
+    function statsOf(arr) {
+      const con_efic = arr.filter(o=>o.eficiencia!==null&&o.eficiencia!==undefined)
+      return {
+        total:       arr.length,
+        cumplidos:   mk(arr,o=>o.estado===1||o.estado===2),
+        a_tiempo:    mk(arr,o=>o.estado===1),
+        tarde:       mk(arr,o=>o.estado===2),
+        en_proceso:  mk(arr,o=>o.estado===3),
+        por_vencer:  mk(arr,o=>o.estado===4),
+        fuera:       mk(arr,o=>o.estado===5),
+        con_reporte: mk(arr,o=>!!o.fecha_reporte),
+        pen_total:   arr.reduce((s,o)=>s+(o.val_total_penalidad||0),0),
+        efic_prom:   con_efic.length>0 ? Math.round(con_efic.reduce((s,o)=>s+(o.eficiencia||0),0)/con_efic.length) : null,
+      }
+    }
+
+    const global = statsOf(otsFilt)
+
+    const xModulo = rawModulos.map(mod => {
+      const mis = otsFilt.filter(o=>o.modulo_id===mod.id)
+      const s   = statsOf(mis)
+      const xCont = rawConts.map(cont => {
+        const mc    = mis.filter(o=>o.contratista_id===cont.id)
+        const cefic = mc.filter(o=>o.eficiencia!==null&&o.eficiencia!==undefined)
+        return {
+          ...cont, total:mc.length,
+          cumplidos:  mk(mc,o=>o.estado===1||o.estado===2),
+          a_tiempo:   mk(mc,o=>o.estado===1),
+          tarde:      mk(mc,o=>o.estado===2),
+          en_proceso: mk(mc,o=>o.estado===3||o.estado===4),
+          fuera:      mk(mc,o=>o.estado===5),
+          pen:        mc.reduce((s,o)=>s+(o.val_total_penalidad||0),0),
+          efic_prom:  cefic.length>0 ? Math.round(cefic.reduce((s,o)=>s+(o.eficiencia||0),0)/cefic.length) : null,
+          pct_cumpl:  mc.length>0 ? Math.round(mk(mc,o=>o.estado===1||o.estado===2)/mc.length*100) : 0,
+          cantidad_prog: mc.reduce((s,o)=>s+(o.cantidad_programada||0),0),
+          cantidad_entr: mc.reduce((s,o)=>s+(o.cantidad_entregada||0),0),
+        }
+      }).filter(cont=>cont.total>0).sort((a,b)=>(b.efic_prom??-1)-(a.efic_prom??-1))
+
+      const xSem = {}
+      mis.forEach(o=>{
+        if(!o.semana) return
+        if(!xSem[o.semana]) xSem[o.semana]={total:0,a_tiempo:0,tarde:0,en_proceso:0,por_vencer:0,fuera:0}
+        xSem[o.semana].total++
+        if(o.estado===1) xSem[o.semana].a_tiempo++
+        if(o.estado===2) xSem[o.semana].tarde++
+        if(o.estado===3) xSem[o.semana].en_proceso++
+        if(o.estado===4) xSem[o.semana].por_vencer++
+        if(o.estado===5) xSem[o.semana].fuera++
+      })
+      return { ...mod, ...s, ots:mis, xCont, xSemana: Object.entries(xSem).sort(([a],[b])=>a.localeCompare(b)), tiene_cantidad:[1,2,3].includes(mod.id) }
+    })
+
+    const urgentes = otsFilt
+      .filter(o=>o.estado===4||o.estado===5)
+      .sort((a,b)=>(getDiasRestantes(a.fecha_limite_expedientes)??999)-(getDiasRestantes(b.fecha_limite_expedientes)??999))
+      .slice(0,10)
+
+    const xSemG = {}
+    otsFilt.forEach(o=>{
+      if(!o.semana) return
+      if(!xSemG[o.semana]) xSemG[o.semana]={total:0,a_tiempo:0,tarde:0,en_proceso:0,por_vencer:0,fuera:0}
+      xSemG[o.semana].total++
+      if(o.estado===1) xSemG[o.semana].a_tiempo++
+      if(o.estado===2) xSemG[o.semana].tarde++
+      if(o.estado===3) xSemG[o.semana].en_proceso++
+      if(o.estado===4) xSemG[o.semana].por_vencer++
+      if(o.estado===5) xSemG[o.semana].fuera++
+    })
+
+    return { global, xModulo, urgentes, xSemG: Object.entries(xSemG).sort(([a],[b])=>a.localeCompare(b)).slice(-12), otsCalcAll: otsAll }
+  }, [periodoSelec, anioSelec, mesSelec, semanaSelec, verPor, periodo, datos, rawModulos, rawConts])
 
   useEffect(()=>{
     if (!window.Chart) {
@@ -390,7 +1257,7 @@ export default function DashboardPage() {
     </div>
   )
 
-  const { global, xModulo, urgentes, xSemG } = datos
+  const { global, xModulo, urgentes, xSemG } = datosActivos || datos
   const pctG = global.total>0 ? Math.round(global.cumplidos/global.total*100) : 0
   const segG = [
     {n:global.a_tiempo,   color:C[1], label:'A tiempo'},
@@ -401,16 +1268,161 @@ export default function DashboardPage() {
   ]
   const modSelec = modActivo!=='general' ? xModulo.find(m=>m.id===parseInt(modActivo)) : null
 
+  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
   return (
     <div className="p-5 space-y-5" style={{maxWidth:1600}}>
 
       {/* ── HEADER ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-lg font-bold text-white">📊 Dashboard General</h1>
-          <p className="text-gray-500 text-xs mt-0.5">Periodo {periodo} · {global.total} registros · {xModulo.length} módulos activos</p>
+          <p className="text-gray-500 text-xs mt-0.5">{periodoSelec||periodo} · {global.total} registros · {xModulo.length} módulos activos</p>
         </div>
-        <button onClick={cargar} className="btn-ghost text-xs">🔄 Actualizar</button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Selector de vista */}
+          <select value={verPor} onChange={e=>{setVerPor(e.target.value);setMesSelec('');setSemanaSelec('');setAnioSelec('')}}
+            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+            <option value="semestral">Semestral</option>
+            <option value="anual">Anual</option>
+            <option value="mensual">Mensual</option>
+            <option value="semanal">Semanal</option>
+          </select>
+
+          {/* Selector de año — solo en vista Anual */}
+          {verPor==='anual' && (
+            <select value={anioSelec||(periodoSelec||periodo)?.split('-')[0]||''}
+              onChange={e=>setAnioSelec(e.target.value)}
+              className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+              {[...new Set(periodosList.map(p=>p.split('-')[0]).filter(Boolean))].sort((a,b)=>b-a).map(a=>(
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Selector de período — en semestral, mensual y semanal */}
+          {verPor!=='anual' && (
+            <select value={periodoSelec||periodo}
+              onChange={e=>{setPeriodoSelec(e.target.value);setMesSelec('');setSemanaSelec('')}}
+              className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+              {periodosList.map(p=>(
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Selector de mes — solo en vista Mensual */}
+          {verPor==='mensual' && (
+            <select value={mesSelec}
+              onChange={e=>setMesSelec(e.target.value)}
+              className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+              <option value="">Todos los meses</option>
+              {[...new Set((datos?.otsCalcAll||[])
+                .filter(o=>!periodoSelec||o.periodo===(periodoSelec||periodo))
+                .map(o=>o.fecha_inicio?.slice(0,7)).filter(Boolean))
+              ].sort().map(m=>(
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Selector de semana — solo en vista Semanal */}
+          {verPor==='semanal' && (
+            <select value={semanaSelec}
+              onChange={e=>setSemanaSelec(e.target.value)}
+              className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+              <option value="">Todas las semanas</option>
+              {[...new Set((datos?.otsCalcAll||[])
+                .filter(o => o.periodo===(periodoSelec||periodo))
+                .map(o=>o.semana)
+                .filter(s => s && s.length < 15 && s.toLowerCase() !== 'semana'))
+              ].sort().map(s=>(
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          )}
+          <button onClick={()=>setModalMeta({modulo_id:null,modulo_nombre:'',modulo_icono:'🎯',periodo:periodoSelec||periodo})}
+            className="btn-ghost text-xs">🎯 Metas</button>
+          <button onClick={cargar} className="btn-ghost text-xs">🔄 Actualizar</button>
+        </div>
       </div>
 
       {/* ── SELECTOR DE MÓDULO ── */}
@@ -436,7 +1448,66 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* ══════════ VISTA GENERAL ══════════ */}
+      {/* ══════════ AVANCE DE METAS ══════════ */}
+      {(() => {
+        const tieneMetas = xModulo.some(mod => getMetasDelModulo(mod.id, periodo).length > 0)
+        if (!tieneMetas) return null
+        return (
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🎯</span>
+                <span className="text-sm font-bold text-white">Avance de Metas</span>
+                <span className="text-xs text-gray-500">· {periodo}</span>
+              </div>
+            </div>
+            <div className="grid gap-3" style={{gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))'}}>
+              {xModulo.map(mod => {
+                const metasMod = getMetasDelModulo(mod.id, periodo)
+                const entregado = mod.ots?.reduce((s,o)=>s+(o.cantidad_entregada||0),0) || 0
+                if (metasMod.length === 0) return null
+                return (
+                  <div key={mod.id} className="rounded-xl p-4 border border-gray-800" style={{background:'#0a0f1e'}}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{mod.icono}</span>
+                        <span className="text-xs font-semibold text-gray-200 truncate">{mod.nombre}</span>
+                      </div>
+                      <button onClick={()=>abrirModalMeta(mod)}
+                        className="text-xs text-gray-600 hover:text-yellow-400 transition-colors flex-shrink-0 ml-2"
+                        title="Editar metas">✏️</button>
+                    </div>
+                    <div className="space-y-3">
+                      {metasMod.map(m => {
+                        const pctMeta = Math.min(100, Math.round(entregado / m.meta.cantidad * 100))
+                        const color   = pctMeta>=100?'#22c55e':pctMeta>=70?'#3b82f6':'#f59e0b'
+                        return (
+                          <div key={m.tipo}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-400">{m.label}</span>
+                              <span className="font-mono font-bold" style={{color}}>
+                                {entregado.toLocaleString('es-PE')} / {m.meta.cantidad.toLocaleString('es-PE')}
+                                <span className="text-gray-500 ml-1">({pctMeta}%)</span>
+                              </span>
+                            </div>
+                            <div className="w-full h-2 rounded-full" style={{background:'#1e293b'}}>
+                              <div className="h-2 rounded-full transition-all duration-500" style={{
+                                width:`${pctMeta}%`, background:color
+                              }}/>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              }).filter(Boolean)}
+            </div>
+          </div>
+        )
+      })()}
+
+            {/* ══════════ VISTA GENERAL ══════════ */}
       {modActivo==='general' && (<>
 
         {/* KPIs */}
@@ -469,7 +1540,87 @@ export default function DashboardPage() {
               <div className="flex-1 space-y-2.5">
                 {segG.map(s => {
                   const pct = global.total > 0 ? Math.round(s.n / global.total * 100) : 0
-                  return (
+                  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return (
                     <div key={s.label}>
                       <div className="flex items-center justify-between mb-0.5">
                         <div className="flex items-center gap-1.5">
@@ -500,7 +1651,87 @@ export default function DashboardPage() {
               {xModulo.filter(m=>m.total>0).map(mod=>{
                 const pct=mod.total>0?Math.round(mod.cumplidos/mod.total*100):0
                 const segs=[{n:mod.a_tiempo,color:C[1],label:'A tiempo'},{n:mod.tarde,color:C[2],label:'Tarde'},{n:mod.en_proceso,color:C[3],label:'En proceso'},{n:mod.por_vencer,color:C[4],label:'Por vencer'},{n:mod.fuera,color:C[5],label:'Fuera'}]
-                return (
+                // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return (
                   <Tooltip key={mod.id} block content={<>
                     <div className="font-bold text-white mb-2">{mod.icono} {mod.nombre}</div>
                     <div className="space-y-0.5">
@@ -531,6 +1762,25 @@ export default function DashboardPage() {
                         <Leyenda items={LEYENDA_ESTADOS}/>
                         <span className="text-xs font-mono font-bold" style={{color:pct>=80?C[1]:pct>=50?C[4]:C[5]}}>{pct}% cumplidos</span>
                       </div>
+                      {/* Barras de meta */}
+                      {getMetasDelModulo(mod.id, periodo).map(m => {
+                        const entregado = mod.ots?.reduce((s,o)=>s+(o.cantidad_entregada||0),0) || 0
+                        const pctMeta   = Math.min(100, Math.round(entregado / m.meta.cantidad * 100))
+                        return (
+                          <div key={m.tipo} className="mt-1.5">
+                            <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+                              <span>🎯 {m.label}</span>
+                              <span className="font-mono">{entregado.toLocaleString('es-PE')} / {m.meta.cantidad.toLocaleString('es-PE')} ({pctMeta}%)</span>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full" style={{background:'#1e293b'}}>
+                              <div className="h-1.5 rounded-full transition-all" style={{
+                                width:`${pctMeta}%`,
+                                background: pctMeta>=100?'#22c55e':pctMeta>=70?'#3b82f6':'#f59e0b'
+                              }}/>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </Tooltip>
                 )
@@ -563,7 +1813,87 @@ export default function DashboardPage() {
                 {urgentes.map(ot=>{
                   const dias=getDiasRestantes(ot.fecha_limite_expedientes)
                   const urg=ot.estado===5?C[5]:C[4]
-                  return (
+                  // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return (
                     <Tooltip key={ot.id} content={<>
                       <div className="font-bold text-white">{ot._mod?.icono} {ot._mod?.nombre}</div>
                       {ot._cont&&<div className="text-gray-400 text-xs mt-0.5">{ot._cont.nombre}</div>}
@@ -677,7 +2007,87 @@ export default function DashboardPage() {
                 const ei     = getEficienciaLabel(c.efic_prom)
                 const medals = ['🥇','🥈','🥉']
                 const pctCant = c.cantidad_prog>0 ? Math.round(c.cantidad_entr/c.cantidad_prog*100) : null
-                return (
+                // ── Helpers de metas ───────────────────────────────────────
+  function getMeta(modulo_id, tipo, referencia) {
+    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
+  }
+
+  function getMetasDelModulo(modulo_id, per) {
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const todas = [
+      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
+      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
+      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
+      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
+    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
+      .filter(m => m.meta)
+    // Si hay verPor activo, mostrar solo esa vista primero + las demás
+    if (verPor && todas.find(m=>m.tipo===verPor)) {
+      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
+    }
+    return todas
+  }
+
+  async function abrirModalMeta(mod) {
+    const per = periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    setMetaForm({
+      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
+      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
+      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
+      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
+    })
+    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
+  }
+
+  async function guardarMetas() {
+    if (!modalMeta) return
+    setGuardandoMeta(true)
+    const per  = modalMeta.periodo
+    const anio = per?.split('-')[0] || ''
+    const mesActual = new Date().toISOString().slice(0,7)
+    const semActual = (() => {
+      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
+      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
+    })()
+    const items = [
+      { tipo:'semestral', ref:per,        val:metaForm.semestral },
+      { tipo:'anual',     ref:anio,       val:metaForm.anual },
+      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
+      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
+    ]
+    for (const item of items) {
+      const cant = parseInt(item.val)
+      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
+      if (!isNaN(cant) && cant > 0) {
+        if (existing) {
+          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
+        } else {
+          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
+        }
+      } else if (existing) {
+        // Si se borró el valor, eliminar la meta
+        await supabase.from('metas').delete().eq('id', existing.id)
+      }
+    }
+    // Recargar metas
+    const { data: nuevasMetas } = await supabase.from('metas').select('*')
+    setMetas(nuevasMetas || [])
+    setGuardandoMeta(false)
+    setModalMeta(null)
+  }
+
+  return (
                   <Tooltip key={c.id} block content={<>
                     <div className="font-bold text-white mb-2">{medals[i]||`#${i+1}`} {c.nombre}</div>
                     <div className="space-y-0.5">
@@ -750,6 +2160,67 @@ export default function DashboardPage() {
           </div>
         )}
       </>)}
+      {/* ── MODAL METAS ── */}
+      {modalMeta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="rounded-xl p-6 shadow-2xl w-96" style={{background:'#0f172a',border:'1px solid #1e293b'}}>
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">🎯</span>
+              <span className="text-sm font-bold text-white">Configurar Metas</span>
+            </div>
+            {/* Selector de módulo si se abrió desde el header */}
+            {modalMeta.modulo_id === null && (
+              <div className="mb-3">
+                <label className="text-xs text-gray-400 mb-1 block">Módulo</label>
+                <select className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  onChange={e=>{
+                    const mod = datos?.xModulo?.find(m=>String(m.id)===e.target.value)
+                    if(mod) abrirModalMeta(mod)
+                  }}>
+                  <option value="">Selecciona un módulo...</option>
+                  {datos?.xModulo?.filter(m => m.periodo === periodo || !m.periodo).map(m=>(
+                    <option key={m.id} value={m.id}>{m.icono} {m.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {modalMeta.modulo_id !== null && (
+              <>
+              <div className="text-xs text-gray-400 mb-3">{modalMeta.modulo_icono} {modalMeta.modulo_nombre} · {modalMeta.periodo}</div>
+            <div className="space-y-3">
+              {[
+                {key:'semestral', label:'Semestral ('+modalMeta.periodo+')', placeholder:'Ej: 5000'},
+                {key:'anual',     label:'Anual ('+modalMeta.periodo?.split('-')[0]+')', placeholder:'Ej: 10000'},
+                {key:'mensual',   label:'Mensual ('+new Date().toISOString().slice(0,7)+')', placeholder:'Ej: 800'},
+                {key:'semanal',   label:'Semanal (semana actual)', placeholder:'Ej: 200'},
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs text-gray-400 mb-1 block">{f.label}</label>
+                  <input type="number"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
+                    placeholder={f.placeholder}
+                    value={metaForm[f.key]}
+                    onChange={e=>setMetaForm(p=>({...p,[f.key]:e.target.value}))}
+                  />
+                </div>
+              ))}
+            </div>
+            </>
+            )}
+            {modalMeta.modulo_id !== null && <div className="flex gap-2 mt-5">
+              <button onClick={()=>setModalMeta(null)}
+                className="flex-1 px-4 py-2 rounded-lg text-xs text-gray-400 border border-gray-700 hover:border-gray-500 transition-all">
+                Cancelar
+              </button>
+              <button onClick={guardarMetas} disabled={guardandoMeta}
+                className="flex-1 px-4 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-50"
+                style={{background:'linear-gradient(135deg,#3b82f6,#6366f1)'}}>
+                {guardandoMeta ? 'Guardando...' : 'Guardar metas'}
+              </button>
+            </div>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

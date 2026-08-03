@@ -15,7 +15,7 @@ export default function ConfigPage() {
   async function cargar() {
     const [{ data: cfg }, { data: mods }] = await Promise.all([
       supabase.from('config_global').select('*'),
-      supabase.from('modulos').select('*').order('orden'),
+      supabase.from('modulos').select('*').order('periodo', {ascending: false}).order('orden'),
     ])
     const cfgMap = {}
     cfg?.forEach(c => { cfgMap[c.clave] = c.valor })
@@ -89,34 +89,59 @@ export default function ConfigPage() {
             + Nuevo Módulo
           </button>
         </div>
-        <div className="space-y-2">
-          {modulos.map(mod => (
-            <div key={mod.id} className="flex items-center gap-4 p-3 rounded-lg border border-gray-800 bg-gray-900">
-              <div className="text-xl flex-shrink-0">{mod.icono}</div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-gray-200">{mod.nombre}</div>
-                <div className="text-xs text-gray-500 truncate">{mod.descripcion}</div>
-                <div className="flex gap-2 mt-1">
-                  <span className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">{mod.tipo}</span>
-                  {!mod.activo && <span className="text-xs bg-red-950 text-red-400 px-2 py-0.5 rounded">Inactivo</span>}
+        <div className="space-y-4">
+          {(() => {
+            // Agrupar módulos por período
+            const grupos = modulos.reduce((acc, mod) => {
+              const p = mod.periodo || 'Sin período'
+              if (!acc[p]) acc[p] = []
+              acc[p].push(mod)
+              return acc
+            }, {})
+            const periodos = Object.keys(grupos).sort((a, b) => {
+              const parseP = p => { const m = String(p).match(/^(\d{4})-(I{1,2})$/); return m ? [parseInt(m[1]), m[2]==='II'?2:1] : [0,0] }
+              const [ya,sa] = parseP(a); const [yb,sb] = parseP(b)
+              return yb !== ya ? yb - ya : sb - sa
+            })
+            return periodos.map(periodo => (
+              <div key={periodo}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold text-blue-400 uppercase tracking-wider">{periodo}</span>
+                  <div className="flex-1 h-px bg-gray-800"/>
+                  <span className="text-xs text-gray-600">{grupos[periodo].length} módulos</span>
+                </div>
+                <div className="space-y-2">
+                  {grupos[periodo].map(mod => (
+                    <div key={mod.id} className="flex items-center gap-4 p-3 rounded-lg border border-gray-800 bg-gray-900">
+                      <div className="text-xl flex-shrink-0">{mod.icono}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-gray-200">{mod.nombre}</div>
+                        <div className="text-xs text-gray-500 truncate">{mod.descripcion}</div>
+                        <div className="flex gap-2 mt-1">
+                          <span className="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">{mod.tipo}</span>
+                          {!mod.activo && <span className="text-xs bg-red-950 text-red-400 px-2 py-0.5 rounded">Inactivo</span>}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button className="btn-ghost text-xs py-1 px-2"
+                          onClick={() => router.push(`/configuracion/modulos/${mod.id}`)}>
+                          ✏️ Editar
+                        </button>
+                        <button className="btn-ghost text-xs py-1 px-2"
+                          onClick={() => toggleModulo(mod.id, mod.activo)}>
+                          {mod.activo ? '🔕 Desactivar' : '🔔 Activar'}
+                        </button>
+                        <button className="btn-danger text-xs py-1 px-2"
+                          onClick={() => eliminarModulo(mod.id, mod.nombre)}>
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button className="btn-ghost text-xs py-1 px-2"
-                  onClick={() => router.push(`/configuracion/modulos/${mod.id}`)}>
-                  ✏️ Editar
-                </button>
-                <button className="btn-ghost text-xs py-1 px-2"
-                  onClick={() => toggleModulo(mod.id, mod.activo)}>
-                  {mod.activo ? '🔕 Desactivar' : '🔔 Activar'}
-                </button>
-                <button className="btn-danger text-xs py-1 px-2"
-                  onClick={() => eliminarModulo(mod.id, mod.nombre)}>
-                  🗑️
-                </button>
-              </div>
-            </div>
-          ))}
+            ))
+          })()}
         </div>
       </div>
     </div>

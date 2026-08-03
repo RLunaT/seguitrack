@@ -42,7 +42,7 @@ export default function EditarModuloPage() {
   const [error, setError]     = useState('')
   const [form, setForm] = useState({
     nombre:'', descripcion:'', icono:'📋', color:'#3b82f6',
-    tipo:'ot', actividades:'', motivos:'', tiene_penalidad:false,
+    periodo:'2026-I', tipo:'ot', actividades:'', motivos:'', tiene_penalidad:false,
     plantilla_titulo:'', plantilla_cumplimiento:'', plantilla_actividad:'', plantilla_editado_por:'',
   })
 
@@ -55,6 +55,7 @@ export default function EditarModuloPage() {
       setForm({
         nombre:               mod.nombre || '',
         descripcion:          mod.descripcion || '',
+        periodo:              mod.periodo || '2026-I',
         icono:                mod.icono || '📋',
         color:                mod.color || '#3b82f6',
         tipo:                 mod.tipo || 'ot',
@@ -77,6 +78,7 @@ export default function EditarModuloPage() {
     const { error: err } = await supabase.from('modulos').update({
       nombre:               form.nombre.trim(),
       descripcion:          form.descripcion.trim() || null,
+      periodo:              form.periodo.trim() || '2026-I',
       icono:                form.icono,
       color:                form.color,
       tipo:                 form.tipo,
@@ -116,6 +118,12 @@ export default function EditarModuloPage() {
           <div>
             <label className="text-xs font-semibold text-gray-400 block mb-1">Nombre del módulo *</label>
             <input className="input-base" value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-400 block mb-1">Período</label>
+            <input className="input-base" placeholder="Ej: 2026-I, 2026-II, 2027-I"
+              value={form.periodo} onChange={e=>setForm(p=>({...p,periodo:e.target.value}))} />
+            <p className="text-xs text-gray-600 mt-1">Año-Semestre. Agrupa los módulos en el menú lateral.</p>
           </div>
           <div>
             <label className="text-xs font-semibold text-gray-400 block mb-1">Descripción</label>

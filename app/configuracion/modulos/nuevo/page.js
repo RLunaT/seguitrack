@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 const ICONOS = ['📋','⚡','🔄','🆕','📄','📁','🔍','🏗️','🔧','📊','📅','🎯','⚠️','✅','🔔','🌐','📢','🏛️','📌','🗂️']
 const COLORES = ['#3b82f6','#22c55e','#eab308','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#a855f7','#2E75B6','#70AD47']
@@ -41,10 +41,12 @@ function colLetra(n) {
 
 export default function NuevoModuloPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const periodoDeUrl = searchParams.get('periodo')
   const [step, setStep] = useState(1)
   const [form, setForm] = useState({
     nombre: '', descripcion: '', icono: '📋', color: '#3b82f6',
-    tipo: 'ot', actividades: '', motivos: '', tiene_penalidad: false,
+    periodo: periodoDeUrl || '2026-I', tipo: 'ot', actividades: '', motivos: '', tiene_penalidad: false,
     plantilla_titulo: '', plantilla_cumplimiento: '', plantilla_actividad: '', plantilla_editado_por: '',
   })
   const [saving, setSaving] = useState(false)
@@ -137,6 +139,7 @@ export default function NuevoModuloPage() {
       plantilla_cumplimiento: form.plantilla_cumplimiento || null,
       plantilla_actividad: form.plantilla_actividad || null,
       plantilla_editado_por: form.plantilla_editado_por || null,
+      periodo: form.periodo.trim() || '2026-I',
       activo: true, orden: 99,
     }).select().single()
     if (err) { setError(err.message); setSaving(false); return }

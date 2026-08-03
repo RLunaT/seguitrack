@@ -305,6 +305,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       duracion_real:            calc.duracion_real,
       dias_fuera_plazo:         calc.dias_fuera_plazo,
       val_total_penalidad:      calc.val_total_penalidad,
+      periodo:                  periodo || null,
       actualizado_en:           new Date().toISOString(),
     }
 

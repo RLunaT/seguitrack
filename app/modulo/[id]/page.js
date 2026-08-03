@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
   calcularCamposOT, calcularCamposConEficiencia, getEstadoInfo, getEficienciaLabel, getEficiencia,
@@ -44,6 +44,8 @@ const CAMPOS_BASE = [
 
 export default function ModuloPage() {
   const { id } = useParams()
+  const searchParams = useSearchParams()
+  const periodoUrl = searchParams.get('periodo')
   const [tab, setTab] = useState('tabla')
   const [modulo, setModulo] = useState(null)
   const [ots, setOts] = useState([])
@@ -91,12 +93,14 @@ export default function ModuloPage() {
   const cargar = useCallback(async () => {
     const [{ data: mod }, { data: otsData }, { data: conts }, { data: campos }, { data: cfg }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
-      supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
+      periodoUrl
+        ? supabase.from('ots').select('*').eq('modulo_id', id).eq('periodo', periodoUrl).order('numero_registro')
+        : supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
       supabase.from('contratistas').select('*, contratista_modulos!inner(modulo_id, orden)').eq('contratista_modulos.modulo_id', parseInt(id)).eq('activo', true),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
     ])
-    const p = cfg?.find(c => c.clave === 'periodo')?.valor || '2026-I'
+    const p = periodoUrl || cfg?.find(c => c.clave === 'periodo')?.valor || '2026-I'
     setPeriodo(p)
     setModulo(mod)
     const contsOrdenados = (conts || []).map(c => ({
@@ -118,7 +122,7 @@ export default function ModuloPage() {
     })
     setOts(calculadas)
     setLoading(false)
-  }, [id])
+  }, [id, periodoUrl])
 
   useEffect(() => { cargar() }, [cargar])
 
