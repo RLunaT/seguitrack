@@ -1,10 +1,10 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-export default function Sidebar({ mobileOpen, onMobileClose }) {
+function SidebarInner({ mobileOpen, onMobileClose }) {
   const pathname      = usePathname()
   const searchParams  = useSearchParams()
   const router        = useRouter()
@@ -412,5 +412,12 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
         </div>
       )}
     </>
+  )
+}
+export default function Sidebar(props) {
+  return (
+    <Suspense fallback={null}>
+      <SidebarInner {...props} />
+    </Suspense>
   )
 }
