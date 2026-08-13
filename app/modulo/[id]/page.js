@@ -387,11 +387,11 @@ export default function ModuloPage() {
 
     // Formato fechas para el Word
     function fmtEntrega(d) {
-      if (!d) return ''
-      const dt = new Date(d + 'T00:00:00')
-      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
-    }
+  if (!d) return ''
+  const dt = new Date(d + 'T00:00:00')
+  const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+  return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+}
     function fmtDia(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')
@@ -459,11 +459,11 @@ export default function ModuloPage() {
     const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
 
     function fmtEntrega(d) {
-      if (!d) return ''
-      const dt = new Date(d + 'T00:00:00')
-      const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
-    }
+  if (!d) return ''
+  const dt = new Date(d + 'T00:00:00')
+  const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+  return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+}
     function fmtDia(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')

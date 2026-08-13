@@ -112,6 +112,56 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
     setPeriodos(nuevosPeriodos)
     setPeriodosAbiertos(prev => { const n = {...prev}; delete n[p]; return n })
   }
+function rangoDePeriodo(per) {
+    const m = String(per).match(/^(\d{4})-(I{1,2})$/)
+    if (!m) return null
+    const anio = m[1]
+    return m[2] === 'II'
+      ? { inicio: `${anio}-07-01`, fin: `${anio}-12-31` }
+      : { inicio: `${anio}-01-01`, fin: `${anio}-06-30` }
+  }
+
+  async function vincularContratistasVigentes(modulosNuevos, periodoNuevo) {
+    const rango  = rangoDePeriodo(periodoNuevo)
+    const nuevosOt = (modulosNuevos || []).filter(m => m.tipo === 'ot')
+    if (!rango || nuevosOt.length === 0) return
+
+    const familias = {}
+    for (const nuevo of nuevosOt) {
+      const hermanos = modulos.filter(m => m.tipo === 'ot' && m.nombre === nuevo.nombre)
+      if (hermanos.length === 0) continue
+      const idsFamilia = hermanos.map(m => m.id)
+      familias[nuevo.id] = { idsFamilia, anchor: Math.min(...idsFamilia) }
+    }
+    const todosIdsFamilia = [...new Set(Object.values(familias).flatMap(f => f.idsFamilia))]
+    if (todosIdsFamilia.length === 0) return
+
+    const [{ data: rels }, { data: historial }] = await Promise.all([
+      supabase.from('contratista_modulos').select('contratista_id, modulo_id').in('modulo_id', todosIdsFamilia),
+      supabase.from('contratos_historial').select('contratista_id, modulo_id, fecha_inicio, fecha_fin')
+        .in('modulo_id', [...new Set(Object.values(familias).map(f => f.anchor))]),
+    ])
+
+    const filasNuevas = []
+    for (const nuevo of nuevosOt) {
+      const fam = familias[nuevo.id]
+      if (!fam) continue
+      const contratistasFamilia = [...new Set(
+        (rels || []).filter(r => fam.idsFamilia.includes(r.modulo_id)).map(r => r.contratista_id)
+      )]
+      for (const cid of contratistasFamilia) {
+        const contratos = (historial || []).filter(h => h.contratista_id === cid && h.modulo_id === fam.anchor)
+        const vigente = contratos.length === 0 || contratos.some(c =>
+          (!c.fecha_inicio || c.fecha_inicio <= rango.fin) &&
+          (!c.fecha_fin    || c.fecha_fin    >= rango.inicio)
+        )
+        if (vigente) filasNuevas.push({ contratista_id: cid, modulo_id: nuevo.id })
+      }
+    }
+    if (filasNuevas.length > 0) {
+      await supabase.from('contratista_modulos').insert(filasNuevas)
+    }
+  }
 
   async function crearPeriodo() {
     const p = nuevoPeriodo.trim().toUpperCase()
@@ -166,7 +216,12 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
       orden:                  m.orden ?? 99,
     }))
 
-    await supabase.from('modulos').insert(insertsCompletos)
+    const { data: modulosInsertados } = await supabase
+      .from('modulos')
+      .insert(insertsCompletos)
+      .select('id, nombre, tipo')
+
+    await vincularContratistasVigentes(modulosInsertados || [], p)
 
     // Guardar período en config_global
     const nuevosPeriodos = [...new Set([...periodos, p])].sort((a, b) => b.localeCompare(a))
@@ -313,7 +368,13 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
 
         {/* Nuevo período */}
         <button
-          onClick={() => { setModulosSeleccionados(modulos.map(m => m.id)); setModalNuevoPeriodo(true) }}
+          onClick={() => {
+            const modulosUnicos = modulos.filter((m, i, arr) =>
+              arr.findIndex(x => x.nombre === m.nombre) === i
+            )
+            setModulosSeleccionados(modulosUnicos.map(m => m.id))
+            setModalNuevoPeriodo(true)
+          }}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer text-gray-600 hover:text-blue-400 border border-dashed border-gray-800 hover:border-blue-800 transition-all mt-1"
         >
           <span className="text-base flex-shrink-0">📅</span>
