@@ -3,10 +3,24 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { calcularCamposOT, calcularCamposConEficiencia, generarSemanas, getNombreOT, fmtMoneda, getEficienciaLabel, generarCodigoOT } from '@/lib/formulas'
 
-const OFFSETS = {
-  1: { inicio: 3, fin: 6,  limite: 3 },
-  2: { inicio: 1, fin: 5,  limite: 6 },
-  3: { inicio: 5, fin: 5,  limite: 4 },
+// Nombre "familia" del módulo, sin el sufijo de período
+// (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
+function nombreBase(nombre) {
+  return (nombre || '').replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+}
+function claveGrupo(nombre) {
+  return nombreBase(nombre).toLowerCase()
+}
+
+// Offsets de fechas por FAMILIA de módulo (no por id — el id cambia en
+// cada período nuevo, la familia no).
+const OFFSETS_POR_FAMILIA = {
+  'contrastes de medidores':       { inicio: 3, fin: 6, limite: 3 },
+  'avisos de medidores':           { inicio: 1, fin: 5, limite: 6 },
+  'reemplazos de medidores p-227': { inicio: 5, fin: 5, limite: 4 },
+}
+function getOffsets(modulo) {
+  return OFFSETS_POR_FAMILIA[claveGrupo(modulo?.nombre)] || null
 }
 
 function StepIndicator({ step, total, labels }) {
@@ -44,7 +58,7 @@ function StepIndicator({ step, total, labels }) {
 export default function ModalOT({ modulo, contratistas, camposExtra, actividades, motivos, periodo, ot, onClose, onSave, colsVisibles = {}, totalRegistros = 0 }) {
   const esEdicion    = !!ot
   const esOT         = modulo?.tipo === 'ot'
-  const tieneOffsets = !!OFFSETS[modulo?.id]
+  const tieneOffsets = !!getOffsets(modulo)
   const tienePlantilla = !!modulo?.plantilla_titulo && esOT
   const año          = parseInt(periodo?.split('-')[0]) || new Date().getFullYear()
   const semanas      = generarSemanas(año)
@@ -193,10 +207,11 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
   function setField(key, val) {
     setForm(prev => {
       const u    = { ...prev, [key]: val }
-      const off  = OFFSETS[modulo?.id]
+      const off  = getOffsets(modulo)
 
-      // Cadena automática: cuando cambia una fecha, recalcula las posteriores
-      if (off) {
+      // Cadena automática: cuando cambia una fecha, recalcula las posteriores.
+      // Solo al crear — al editar, cada fecha se modifica de forma independiente.
+      if (off && !esEdicion) {
         if (key === 'fecha_inicio' && val) {
           u.fecha_fin_trabajos       = addDays(val, off.fin)
           u.fecha_limite_expedientes = addDays(addDays(val, off.fin), off.limite)
@@ -246,8 +261,8 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       if (key === 'doc_codigo_ot' && val !== codigoAutoRef.current) {
         codigoAutoRef.current = null
       }
-      if (key === 'doc_fecha_entrega' && val && OFFSETS[modulo?.id]) {
-        const off    = OFFSETS[modulo.id]
+      if (key === 'doc_fecha_entrega' && val && getOffsets(modulo) && !esEdicion) {
+        const off    = getOffsets(modulo)
         // Cadena encadenada: Entrega → Inicio → Fin → Límite
         const fInicio = addDays(val,     off.inicio)
         const fFin    = addDays(fInicio, off.fin)
@@ -597,9 +612,9 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                       {form.datos_extra['doc_fecha_entrega'] && (
                         <div className="grid grid-cols-3 gap-3">
                           {[
-                            {label:'Fecha inicio',       field:'fecha_inicio',             badge:`Entrega +${OFFSETS[modulo.id].inicio}d`},
-                            {label:'Fecha fin trabajos', field:'fecha_fin_trabajos',        badge:`Inicio +${OFFSETS[modulo.id].fin}d`},
-                            {label:'Fecha límite *',     field:'fecha_limite_expedientes',  badge:`Fin +${OFFSETS[modulo.id].limite}d`},
+                            {label:'Fecha inicio',       field:'fecha_inicio',             badge:`Entrega +${getOffsets(modulo).inicio}d`},
+                            {label:'Fecha fin trabajos', field:'fecha_fin_trabajos',        badge:`Inicio +${getOffsets(modulo).fin}d`},
+                            {label:'Fecha límite *',     field:'fecha_limite_expedientes',  badge:`Fin +${getOffsets(modulo).limite}d`},
                           ].map(({label, field, badge}) => (
                             <div key={field} className="p-3 rounded-lg border border-gray-800" style={{background:'#0d1526'}}>
                               <div className="flex items-center justify-between mb-1.5">
@@ -826,7 +841,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   </div>}
                   <div>
                     <label className="text-xs font-semibold text-gray-400 block mb-1">
-                      Semana {tieneOffsets && <span className="text-gray-600 font-normal">(auto desde fecha inicio)</span>}
+                      Semana
                     </label>
                     <select className="input-base" value={form.semana} onChange={e=>setField('semana',e.target.value)}>
                       <option value="">—</option>
@@ -849,15 +864,15 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                     <input className="input-base" type="date" value={form.datos_extra['doc_fecha_entrega']||''} onChange={e=>setExtra('doc_fecha_entrega',e.target.value)}/>
                   </div>}
                   <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio {tieneOffsets&&<span className="text-blue-500 font-normal">(Entrega +{OFFSETS[modulo.id].inicio}d)</span>}</label>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio</label>
                     <input className="input-base" type="date" value={form.fecha_inicio} onChange={e=>setField('fecha_inicio',e.target.value)}/>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha fin trabajos {tieneOffsets&&<span className="text-blue-500 font-normal">(Inicio +{OFFSETS[modulo.id].fin}d)</span>}</label>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha fin trabajos</label>
                     <input className="input-base" type="date" value={form.fecha_fin_trabajos} onChange={e=>setField('fecha_fin_trabajos',e.target.value)}/>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite * {tieneOffsets&&<span className="text-blue-500 font-normal">(Fin +{OFFSETS[modulo.id].limite}d)</span>}</label>
+                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite *</label>
                     <input className="input-base" type="date" value={form.fecha_limite_expedientes} onChange={e=>setField('fecha_limite_expedientes',e.target.value)}/>
                   </div>
                 </div>
