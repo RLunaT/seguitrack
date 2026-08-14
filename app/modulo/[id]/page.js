@@ -14,6 +14,29 @@ import {
 } from './docConfig'
 import { descargarWordTemplate } from './wordGen'
 
+// Nombre "familia" del módulo, sin el sufijo de período
+// (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
+function nombreBase(nombre) {
+  return nombre.replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+}
+function claveGrupo(nombre) {
+  return nombreBase(nombre).toLowerCase()
+}
+// "2026-I" -> ene-jun, "2026-II" -> jul-dic
+function rangoDePeriodo(per) {
+  const m = String(per).match(/^(\d{4})-(I{1,2})$/)
+  if (!m) return null
+  const anio = m[1]
+  return m[2] === 'II'
+    ? { inicio: `${anio}-07-01`, fin: `${anio}-12-31` }
+    : { inicio: `${anio}-01-01`, fin: `${anio}-06-30` }
+}
+function contratoVigenteEnRango(contrato, rango) {
+  if (!rango) return true
+  return (!contrato.fecha_inicio || contrato.fecha_inicio <= rango.fin) &&
+         (!contrato.fecha_fin    || contrato.fecha_fin    >= rango.inicio)
+}
+
 // ── Columnas base — orden exacto según especificación ─────────
 const CAMPOS_BASE = [
   { key: 'numero_registro',    label: 'N° Registro',     always: true  },
@@ -91,28 +114,58 @@ export default function ModuloPage() {
   }
 
   const cargar = useCallback(async () => {
-    const [{ data: mod }, { data: otsData }, { data: conts }, { data: campos }, { data: cfg }] = await Promise.all([
+    const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
       periodoUrl
         ? supabase.from('ots').select('*').eq('modulo_id', id).eq('periodo', periodoUrl).order('numero_registro')
         : supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
-      supabase.from('contratistas').select('*, contratista_modulos!inner(modulo_id, orden)').eq('contratista_modulos.modulo_id', parseInt(id)).eq('activo', true),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
     ])
     const p = periodoUrl || cfg?.find(c => c.clave === 'periodo')?.valor || '2026-I'
     setPeriodo(p)
     setModulo(mod)
-    const contsOrdenados = (conts || []).map(c => ({
-      ...c, _orden: c.contratista_modulos?.[0]?.orden ?? 99
-    })).sort((a, b) => a._orden - b._orden)
+
+    // ── Contratistas vigentes para este módulo/período ──────────────────
+    // No depende de que exista una fila en contratista_modulos para ESTE
+    // id de módulo en particular: se busca la familia completa (mismo
+    // nombre base, sin importar el período) y se filtra por si el
+    // contrato de cada contratista está vigente en las fechas del
+    // período actual. Sin fechas definidas = contrato vigente siempre.
+    let contsOrdenados = []
+    if (mod) {
+      const { data: todosMods } = await supabase.from('modulos').select('id, nombre, tipo')
+      const idsFamiliaReal = (todosMods || [])
+        .filter(m => m.tipo === mod.tipo && claveGrupo(m.nombre) === claveGrupo(mod.nombre))
+        .map(m => m.id)
+      const anchor = idsFamiliaReal.length ? Math.min(...idsFamiliaReal) : mod.id
+
+      const [{ data: rels }, { data: historial }] = await Promise.all([
+        supabase.from('contratista_modulos').select('contratista_id, modulo_id, orden').in('modulo_id', idsFamiliaReal.length ? idsFamiliaReal : [mod.id]),
+        supabase.from('contratos_historial').select('contratista_id, fecha_inicio, fecha_fin').eq('modulo_id', anchor),
+      ])
+      const rango = rangoDePeriodo(p)
+      const idsVigentes = [...new Set((rels || []).map(r => r.contratista_id))].filter(cid => {
+        const contratos = (historial || []).filter(h => h.contratista_id === cid)
+        return contratos.length === 0 || contratos.some(c => contratoVigenteEnRango(c, rango))
+      })
+      if (idsVigentes.length > 0) {
+        const { data: conts } = await supabase.from('contratistas').select('*').in('id', idsVigentes).eq('activo', true)
+        contsOrdenados = (conts || []).map(c => {
+          const rel = (rels || []).find(r => r.contratista_id === c.id && r.modulo_id === mod.id)
+              || (rels || []).find(r => r.contratista_id === c.id)
+          return { ...c, _orden: rel?.orden ?? 99 }
+        }).sort((a, b) => a._orden - b._orden)
+      }
+    }
     setContratistas(contsOrdenados)
+
     setCamposExtra(campos || [])
     // numero_registro is always the positional row number within this module
     // Sort by id (insertion order) to get consistent numbering
     const sortedOts = (otsData || []).slice().sort((a,b) => a.id - b.id)
     const calculadas = sortedOts.map((ot, idx) => {
-      const cont = (conts || []).find(c => c.id === ot.contratista_id)
+      const cont = contsOrdenados.find(c => c.id === ot.contratista_id)
       return {
         ...ot,
         numero_registro: String(idx + 1),  // always positional, never from DB
@@ -387,11 +440,11 @@ export default function ModuloPage() {
 
     // Formato fechas para el Word
     function fmtEntrega(d) {
-  if (!d) return ''
-  const dt = new Date(d + 'T00:00:00')
-  const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
-  return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
-}
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+    }
     function fmtDia(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')
@@ -459,11 +512,11 @@ export default function ModuloPage() {
     const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
 
     function fmtEntrega(d) {
-  if (!d) return ''
-  const dt = new Date(d + 'T00:00:00')
-  const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
-  return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
-}
+      if (!d) return ''
+      const dt = new Date(d + 'T00:00:00')
+      const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+    }
     function fmtDia(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')

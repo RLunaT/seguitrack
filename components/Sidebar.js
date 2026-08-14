@@ -4,6 +4,17 @@ import Link from 'next/link'
 import { usePathname, useSearchParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+// Nombre "familia" del módulo, sin el sufijo de período
+// (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
+// — misma normalización que usa app/configuracion/contratistas/page.js,
+// necesaria porque algunos módulos tienen el período pegado al nombre.
+function nombreBase(nombre) {
+  return nombre.replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+}
+function claveGrupo(nombre) {
+  return nombreBase(nombre).toLowerCase()
+}
+
 function SidebarInner({ mobileOpen, onMobileClose }) {
   const pathname      = usePathname()
   const searchParams  = useSearchParams()
@@ -111,8 +122,16 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
 
     setPeriodos(nuevosPeriodos)
     setPeriodosAbiertos(prev => { const n = {...prev}; delete n[p]; return n })
+
+    // Refrescar módulos: si no se hace esto, el estado local sigue
+    // teniendo ids de módulos ya borrados, y si luego se crea un período
+    // nuevo, esos ids fantasma hacen que falten módulos silenciosamente.
+    await cargarDatos()
   }
-function rangoDePeriodo(per) {
+
+  // ── Convierte "2026-I" / "2026-II" a su rango real de fechas ───────────
+  // I = 1er semestre (ene-jun), II = 2do semestre (jul-dic).
+  function rangoDePeriodo(per) {
     const m = String(per).match(/^(\d{4})-(I{1,2})$/)
     if (!m) return null
     const anio = m[1]
@@ -121,6 +140,10 @@ function rangoDePeriodo(per) {
       : { inicio: `${anio}-01-01`, fin: `${anio}-06-30` }
   }
 
+  // Vincula a cada módulo recién creado los contratistas cuyo contrato
+  // (fechas en contratos_historial) esté vigente durante el rango del
+  // nuevo período — según su vigencia real, sin importar en qué período
+  // se haya registrado originalmente el contratista.
   async function vincularContratistasVigentes(modulosNuevos, periodoNuevo) {
     const rango  = rangoDePeriodo(periodoNuevo)
     const nuevosOt = (modulosNuevos || []).filter(m => m.tipo === 'ot')
@@ -128,7 +151,7 @@ function rangoDePeriodo(per) {
 
     const familias = {}
     for (const nuevo of nuevosOt) {
-      const hermanos = modulos.filter(m => m.tipo === 'ot' && m.nombre === nuevo.nombre)
+      const hermanos = modulos.filter(m => m.tipo === 'ot' && claveGrupo(m.nombre) === claveGrupo(nuevo.nombre))
       if (hermanos.length === 0) continue
       const idsFamilia = hermanos.map(m => m.id)
       familias[nuevo.id] = { idsFamilia, anchor: Math.min(...idsFamilia) }
@@ -151,6 +174,7 @@ function rangoDePeriodo(per) {
       )]
       for (const cid of contratistasFamilia) {
         const contratos = (historial || []).filter(h => h.contratista_id === cid && h.modulo_id === fam.anchor)
+        // Sin fechas registradas → vigencia indefinida, no se excluye.
         const vigente = contratos.length === 0 || contratos.some(c =>
           (!c.fecha_inicio || c.fecha_inicio <= rango.fin) &&
           (!c.fecha_fin    || c.fecha_fin    >= rango.inicio)
@@ -198,8 +222,17 @@ function rangoDePeriodo(per) {
       .select('*')
       .in('id', modulosSeleccionados)
 
+    // Si algún id seleccionado ya no existe en la BD (estado desactualizado
+    // en el navegador), avisar en vez de crear el período incompleto.
+    if ((modsCompletos || []).length !== modulosSeleccionados.length) {
+      alert('Algunos módulos seleccionados ya no existen (la página tenía datos desactualizados). Se recargará la información — vuelve a intentarlo.')
+      setGuardando(false)
+      await cargarDatos()
+      return
+    }
+
     const insertsCompletos = (modsCompletos || []).map(m => ({
-      nombre:                 m.nombre,
+      nombre:                 nombreBase(m.nombre),
       descripcion:            m.descripcion,
       icono:                  m.icono,
       color:                  m.color,
@@ -216,11 +249,25 @@ function rangoDePeriodo(per) {
       orden:                  m.orden ?? 99,
     }))
 
-    const { data: modulosInsertados } = await supabase
+    const { data: insertData } = await supabase
       .from('modulos')
       .insert(insertsCompletos)
       .select('id, nombre, tipo')
 
+    // Si insert().select() no devolvió nada (puede pasar según políticas
+    // RLS aunque el insert sí se haya guardado), se recupera con un SELECT
+    // aparte por período — así vincularContratistasVigentes nunca se salta.
+    let modulosInsertados = insertData
+    if (!modulosInsertados || modulosInsertados.length === 0) {
+      const { data: fallback } = await supabase
+        .from('modulos')
+        .select('id, nombre, tipo')
+        .eq('periodo', p)
+      modulosInsertados = fallback || []
+    }
+
+    // Heredar automáticamente los contratistas vigentes según sus fechas
+    // de contrato, no según en qué período fueron registrados.
     await vincularContratistasVigentes(modulosInsertados || [], p)
 
     // Guardar período en config_global
@@ -370,7 +417,7 @@ function rangoDePeriodo(per) {
         <button
           onClick={() => {
             const modulosUnicos = modulos.filter((m, i, arr) =>
-              arr.findIndex(x => x.nombre === m.nombre) === i
+              arr.findIndex(x => claveGrupo(x.nombre) === claveGrupo(m.nombre)) === i
             )
             setModulosSeleccionados(modulosUnicos.map(m => m.id))
             setModalNuevoPeriodo(true)
@@ -434,7 +481,7 @@ function rangoDePeriodo(per) {
             <div className="text-xs font-semibold text-gray-400 mb-2">Módulos a incluir</div>
             <div className="flex flex-col gap-1 mb-4 max-h-48 overflow-y-auto">
               {modulos.filter((m, i, arr) =>
-                arr.findIndex(x => x.nombre === m.nombre) === i
+                arr.findIndex(x => claveGrupo(x.nombre) === claveGrupo(m.nombre)) === i
               ).map(mod => (
                 <label key={mod.id} className="flex items-center gap-2 cursor-pointer px-2 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">
                   <input
@@ -450,7 +497,7 @@ function rangoDePeriodo(per) {
                     }}
                   />
                   <span className="text-base">{mod.icono}</span>
-                  <span className="text-xs text-gray-300">{mod.nombre}</span>
+                  <span className="text-xs text-gray-300">{nombreBase(mod.nombre)}</span>
                 </label>
               ))}
             </div>
