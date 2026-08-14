@@ -3,6 +3,15 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { calcularCamposConEficiencia, getEficienciaLabel } from '@/lib/formulas'
 
+// Nombre "familia" del módulo, sin el sufijo de período
+// (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
+function nombreBase(nombre) {
+  return (nombre || '').replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+}
+function claveGrupo(nombre) {
+  return nombreBase(nombre).toLowerCase()
+}
+
 const ESTADO_COLORS = {
   1:{bg:'#14532d',text:'#4ade80',label:'Cumplió a tiempo'},
   2:{bg:'#431407',text:'#fb923c',label:'Cumplió tarde'},
@@ -89,6 +98,7 @@ export default function ReportesPage() {
   const [loading,setLoading]         = useState(true)
 
   // Filtros — Set vacío = sin filtro (todos)
+  const [filtPeriodos,    setFiltPeriodos]    = useState(new Set())
   const [filtModulos,     setFiltModulos]     = useState(new Set())
   const [filtContratistas,setFiltContratistas]= useState(new Set())
   const [filtEstados,     setFiltEstados]     = useState(new Set())
@@ -96,6 +106,7 @@ export default function ReportesPage() {
   const [filtActividades, setFiltActividades] = useState(new Set())
   const [filtFechaDesde,  setFiltFechaDesde]  = useState('')
   const [filtFechaHasta,  setFiltFechaHasta]  = useState('')
+  const [generandoExcel,  setGenerandoExcel]  = useState(false)
 
   // Presentación
   const [columnas,    setColumnas]    = useState(new Set(COLUMNAS.map(c=>c.key))) // todas por defecto
@@ -105,27 +116,52 @@ export default function ReportesPage() {
   const [titulo,      setTitulo]      = useState('')
   const [generando,   setGenerando]   = useState(false)
 
+  const [periodosList, setPeriodosList] = useState([])
+
   useEffect(()=>{cargar()},[])
   async function cargar(){
     setLoading(true)
-    const [{data:o},{data:m},{data:c}] = await Promise.all([
+    const [{data:o},{data:m},{data:c},{data:cfg}] = await Promise.all([
       supabase.from('ots').select('*').order('numero_ot'),
-      supabase.from('modulos').select('id,nombre,icono,color').eq('activo',true).order('orden'),
+      supabase.from('modulos').select('id,nombre,icono,color,periodo').eq('activo',true).order('orden'),
       supabase.from('contratistas').select('id,nombre,contrato,tasa_penalidad').eq('activo',true),
+      supabase.from('config_global').select('*'),
     ])
+    const per = cfg?.find(x=>x.clave==='periodo')?.valor || '2026-I'
+    const listaCsv = cfg?.find(x=>x.clave==='periodos_lista')?.valor || per
+    const lista = [...new Set(listaCsv.split(',').map(s=>s.trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a))
+    setPeriodosList(lista.length?lista:[per])
     setOts(o||[]); setModulos(m||[]); setContratistas(c||[])
     setLoading(false)
   }
 
+  // ── Módulos agrupados por familia (evita duplicados por período) ──
+  const familias = useMemo(()=>{
+    const f=[]
+    modulos.forEach(m=>{
+      const clave=claveGrupo(m.nombre)
+      let x=f.find(y=>y.clave===clave)
+      if(!x){x={clave,nombre:nombreBase(m.nombre),icono:m.icono,ids:[]};f.push(x)}
+      x.ids.push(m.id)
+    })
+    return f
+  },[modulos])
+  const modIdToClave = useMemo(()=>{
+    const map={}; modulos.forEach(m=>{map[m.id]=claveGrupo(m.nombre)}); return map
+  },[modulos])
+
   const otsE = useMemo(()=>ots.map(ot=>{
     const contratista   = contratistas.find(c=>c.id===ot.contratista_id)
     const calculados    = calcularCamposConEficiencia(ot, contratista)   // recalcula estado, dias_fuera, penalidad, eficiencia
+    const mod = modulos.find(m=>m.id===ot.modulo_id)
     return {
       ...ot,
       ...calculados,                                           // sobreescribe los valores del DB con los recalculados
-      modulo_nombre:      modulos.find(m=>m.id===ot.modulo_id)?.nombre||'—',
-      modulo_icono:       modulos.find(m=>m.id===ot.modulo_id)?.icono||'📋',
+      modulo_nombre:      mod ? nombreBase(mod.nombre) : '—',
+      modulo_icono:       mod?.icono||'📋',
+      modulo_clave:       mod ? claveGrupo(mod.nombre) : '',
       contratista_nombre: contratista?.nombre||'—',
+      _tasa_penalidad:    contratista?.tasa_penalidad || 0,
     }
   }),[ots,modulos,contratistas])
 
@@ -134,7 +170,8 @@ export default function ReportesPage() {
 
   const otsFiltradas = useMemo(()=>{
     let r=[...otsE]
-    if(filtModulos.size)      r=r.filter(o=>filtModulos.has(o.modulo_id))
+    if(filtPeriodos.size)      r=r.filter(o=>filtPeriodos.has(o.periodo))
+    if(filtModulos.size)      r=r.filter(o=>filtModulos.has(o.modulo_clave))
     if(filtContratistas.size) r=r.filter(o=>filtContratistas.has(o.contratista_id))
     if(filtEstados.size)      r=r.filter(o=>filtEstados.has(o.estado))
     if(filtSemanas.size)      r=r.filter(o=>filtSemanas.has(o.semana))
@@ -147,7 +184,7 @@ export default function ReportesPage() {
       return ordenDir==='asc'?c:-c
     })
     return r
-  },[otsE,filtModulos,filtContratistas,filtEstados,filtSemanas,filtActividades,filtFechaDesde,filtFechaHasta,ordenarPor,ordenDir])
+  },[otsE,filtPeriodos,filtModulos,filtContratistas,filtEstados,filtSemanas,filtActividades,filtFechaDesde,filtFechaHasta,ordenarPor,ordenDir])
 
   // Totales calculados SIEMPRE sobre las OTs filtradas actualmente.
   // "fuera de plazo" = cualquier OT con dias_fuera_plazo > 0
@@ -172,7 +209,7 @@ export default function ReportesPage() {
 
   function toggleCol(key){ setColumnas(p=>{const n=new Set(p);n.has(key)?n.delete(key):n.add(key);return n}) }
   function toggleOrden(key){ if(ordenarPor===key) setOrdenarDir(d=>d==='asc'?'desc':'asc'); else{setOrdenarPor(key);setOrdenarDir('asc')} }
-  function limpiar(){ setFiltModulos(new Set());setFiltContratistas(new Set());setFiltEstados(new Set());setFiltSemanas(new Set());setFiltActividades(new Set());setFiltFechaDesde('');setFiltFechaHasta('') }
+  function limpiar(){ setFiltPeriodos(new Set());setFiltModulos(new Set());setFiltContratistas(new Set());setFiltEstados(new Set());setFiltSemanas(new Set());setFiltActividades(new Set());setFiltFechaDesde('');setFiltFechaHasta('') }
 
   function getCellValue(ot,key){
     switch(key){
@@ -211,6 +248,51 @@ export default function ReportesPage() {
     return g
   },[otsFiltradas,agruparPor])
 
+  function filtrosActivosParaReporte(){
+    const fa={}
+    if(filtPeriodos.size)      fa.periodo     =[...filtPeriodos].join(', ')
+    if(filtModulos.size)      fa.modulo      =[...filtModulos].map(cl=>familias.find(f=>f.clave===cl)?.nombre).filter(Boolean).join(', ')
+    if(filtContratistas.size) fa.contratista =[...filtContratistas].map(id=>contratistas.find(c=>c.id===id)?.nombre).filter(Boolean).join(', ')
+    if(filtEstados.size)      fa.estado      =[...filtEstados].map(e=>ESTADO_COLORS[e]?.label).filter(Boolean).join(', ')
+    if(filtSemanas.size)      fa.semana      =[...filtSemanas].join(', ')
+    if(filtActividades.size)  fa.actividad   =[...filtActividades].join(', ')
+    if(filtFechaDesde)        fa.fechaDesde  =fmtFecha(filtFechaDesde)
+    if(filtFechaHasta)        fa.fechaHasta  =fmtFecha(filtFechaHasta)
+    return fa
+  }
+
+  function otsPayloadParaReporte(){
+    return otsFiltradas.map(ot=>({
+      numero_ot:              ot.numero_ot,
+      nombre_ot:              ot.nombre_ot,
+      modulo_nombre:          ot.modulo_nombre,
+      modulo_icono:           ot.modulo_icono,
+      contratista_nombre:     ot.contratista_nombre,
+      contrato:               ot.contrato,
+      actividad:              ot.actividad,
+      motivo_ot:              ot.motivo_ot,
+      periodo:                ot.periodo,
+      semana:                 ot.semana,
+      fecha_inicio:           ot.fecha_inicio,
+      fecha_fin_trabajos:     ot.fecha_fin_trabajos,
+      fecha_limite_expedientes: ot.fecha_limite_expedientes,
+      fecha_reporte:          ot.fecha_reporte,
+      cantidad_programada:    ot.cantidad_programada,
+      cantidad_entregada:     ot.cantidad_entregada,
+      dias_plazo:             ot.dias_plazo,
+      duracion_real:          ot.duracion_real,
+      dias_fuera_plazo:       ot.dias_fuera_plazo,
+      val_penalidades_manual: ot.val_penalidades_manual,
+      val_total_penalidad:    ot.val_total_penalidad,
+      _tasa_penalidad:        ot._tasa_penalidad,
+      estado:                 ot.estado,
+      progreso:               ot.progreso,
+      datos_extra:            ot.datos_extra || null,
+      eficiencia:             ot.eficiencia,
+      observaciones:          typeof ot.observaciones==='string' ? ot.observaciones : (ot.observaciones ? JSON.stringify(ot.observaciones) : null),
+    }))
+  }
+
   async function generarPDF(){
     // Guarda extra: no llamar al API si no hay datos
     if (!otsFiltradas.length) {
@@ -219,48 +301,14 @@ export default function ReportesPage() {
     }
     setGenerando(true)
     try {
-      const fa={}
-      if(filtModulos.size)      fa.modulo      =[...filtModulos].map(id=>modulos.find(m=>m.id===id)?.nombre).filter(Boolean).join(', ')
-      if(filtContratistas.size) fa.contratista =[...filtContratistas].map(id=>contratistas.find(c=>c.id===id)?.nombre).filter(Boolean).join(', ')
-      if(filtEstados.size)      fa.estado      =[...filtEstados].map(e=>ESTADO_COLORS[e]?.label).filter(Boolean).join(', ')
-      if(filtSemanas.size)      fa.semana      =[...filtSemanas].join(', ')
-      if(filtActividades.size)  fa.actividad   =[...filtActividades].join(', ')
-      if(filtFechaDesde)        fa.fechaDesde  =fmtFecha(filtFechaDesde)
-      if(filtFechaHasta)        fa.fechaHasta  =fmtFecha(filtFechaHasta)
+      const fa=filtrosActivosParaReporte()
 
       const res = await fetch('/api/genreporte',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
           titulo: titulo||'Reporte de Órdenes de Trabajo',
           subtitulo:[fa.modulo,fa.contratista].filter(Boolean).join(' · ')||null,
           filtros:fa, columnas:colsVisibles.map(c=>c.key), agruparPor, totalesReporte,
-          ots:otsFiltradas.map(ot=>({
-            numero_ot:              ot.numero_ot,
-            nombre_ot:              ot.nombre_ot,
-            modulo_nombre:          ot.modulo_nombre,
-            modulo_icono:           ot.modulo_icono,
-            contratista_nombre:     ot.contratista_nombre,
-            contrato:               ot.contrato,
-            actividad:              ot.actividad,
-            motivo_ot:              ot.motivo_ot,
-            periodo:                ot.periodo,
-            semana:                 ot.semana,
-            fecha_inicio:           ot.fecha_inicio,
-            fecha_fin_trabajos:     ot.fecha_fin_trabajos,
-            fecha_limite:           ot.fecha_limite_expedientes,
-            fecha_reporte:          ot.fecha_reporte,
-            cantidad_programada:    ot.cantidad_programada,
-            cantidad_entregada:     ot.cantidad_entregada,
-            dias_plazo:             ot.dias_plazo,
-            duracion_real:          ot.duracion_real,
-            dias_fuera_plazo:       ot.dias_fuera_plazo,
-            val_penalidades_manual: ot.val_penalidades_manual,
-            val_total_penalidad:    ot.val_total_penalidad,
-            estado:                 ot.estado,
-            progreso:               ot.progreso,
-            fecha_entrega_ot:       ot.datos_extra?.doc_fecha_entrega||null,
-            eficiencia:             ot.eficiencia,
-            observaciones:          typeof ot.observaciones==='string' ? ot.observaciones : (ot.observaciones ? JSON.stringify(ot.observaciones) : null),
-          })),
+          ots:otsPayloadParaReporte().map(ot=>({...ot, fecha_limite: ot.fecha_limite_expedientes, fecha_entrega_ot: ot.datos_extra?.doc_fecha_entrega||null})),
         })
       })
       if(!res.ok) throw new Error(await res.text())
@@ -278,7 +326,37 @@ export default function ReportesPage() {
     finally{ setGenerando(false) }
   }
 
-  const hayFiltros=filtModulos.size||filtContratistas.size||filtEstados.size||filtSemanas.size||filtActividades.size||filtFechaDesde||filtFechaHasta
+  async function generarExcel(){
+    if (!otsFiltradas.length) {
+      alert('No hay órdenes de trabajo para generar el reporte. Verificá los filtros.')
+      return
+    }
+    setGenerandoExcel(true)
+    try {
+      const fa=filtrosActivosParaReporte()
+      const res = await fetch('/api/genreporte-excel',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          titulo: titulo || 'Reporte de Órdenes de Trabajo',
+          subtitulo:[fa.modulo,fa.contratista].filter(Boolean).join(' · ')||null,
+          filtros:fa, columnas:colsVisibles.map(c=>c.key),
+          ots:otsPayloadParaReporte(),
+        })
+      })
+      if(!res.ok) throw new Error(await res.text())
+      const blob=await res.blob()
+      const url=URL.createObjectURL(blob)
+      const a=document.createElement('a'); a.href=url; a.download=`Reporte_OTs_${new Date().toISOString().slice(0,10)}.xlsx`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(()=>URL.revokeObjectURL(url),3000)
+    } catch(e){
+      const msg = e.message?.startsWith('{') ? (JSON.parse(e.message)?.error || e.message) : e.message
+      alert('Error al generar el Excel: ' + msg)
+    } finally {
+      setGenerandoExcel(false)
+    }
+  }
+
+  const hayFiltros=filtPeriodos.size||filtModulos.size||filtContratistas.size||filtEstados.size||filtSemanas.size||filtActividades.size||filtFechaDesde||filtFechaHasta
 
   if(loading) return <div className="flex items-center justify-center h-full"><div className="text-gray-500 text-sm">Cargando...</div></div>
 
@@ -295,6 +373,10 @@ export default function ReportesPage() {
         </div>
         <div className="flex items-center gap-2">
           {hayFiltros&&<button onClick={limpiar} className="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-all">✕ Limpiar filtros</button>}
+          <button onClick={generarExcel} disabled={generandoExcel||otsFiltradas.length===0}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-50 border border-green-700 text-green-400 hover:bg-green-950">
+            {generandoExcel?'⏳ Generando...':'📊 Descargar Excel'}
+          </button>
           <button onClick={generarPDF} disabled={generando||otsFiltradas.length===0}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-semibold disabled:opacity-50"
             style={{background:'linear-gradient(135deg,#3b82f6,#6366f1)',color:'white'}}>
@@ -313,8 +395,10 @@ export default function ReportesPage() {
           </div>
           <div className="border-t border-gray-800"/>
           <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Filtros</div>
+          <div><label className="text-xs text-gray-400 mb-1 block">Período</label>
+            <MultiSelect opciones={periodosList.map(p=>({value:p,label:p}))} seleccionados={filtPeriodos} onChange={setFiltPeriodos}/></div>
           <div><label className="text-xs text-gray-400 mb-1 block">Módulo</label>
-            <MultiSelect opciones={modulos.map(m=>({value:m.id,label:`${m.icono} ${m.nombre}`}))} seleccionados={filtModulos} onChange={setFiltModulos}/></div>
+            <MultiSelect opciones={familias.map(f=>({value:f.clave,label:`${f.icono} ${f.nombre}`}))} seleccionados={filtModulos} onChange={setFiltModulos}/></div>
           <div><label className="text-xs text-gray-400 mb-1 block">Contratista</label>
             <MultiSelect opciones={contratistas.map(c=>({value:c.id,label:c.nombre}))} seleccionados={filtContratistas} onChange={setFiltContratistas}/></div>
           <div><label className="text-xs text-gray-400 mb-1 block">Estado</label>
@@ -353,7 +437,7 @@ export default function ReportesPage() {
         </div>
 
         {/* PREVIEW */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6">
           <div className="grid grid-cols-4 gap-4 mb-6">
             {[
               {label:'Total OTs',      value:kpis.total,                        sub:'en la selección',     color:'#3b82f6'},
@@ -374,13 +458,14 @@ export default function ReportesPage() {
               <div className="text-sm">No hay OTs con los filtros seleccionados</div>
             </div>
           ):(
-            <div className="rounded-xl border border-gray-800 overflow-auto">
-              <table className="w-full text-xs" style={{borderCollapse:'collapse'}}>
+            <div className="rounded-xl border border-gray-800 overflow-auto" style={{maxHeight:'65vh'}}>
+              <table className="text-xs" style={{borderCollapse:'collapse',width:'max-content',minWidth:'100%'}}>
                 <thead>
-                  <tr style={{background:'#0f172a'}}>
+                  <tr style={{background:'#111827'}}>
                     {colsVisibles.map(col=>(
                       <th key={col.key} onClick={()=>toggleOrden(col.key)}
-                        className="px-3 py-2.5 text-left text-gray-400 font-semibold border-b border-gray-800 cursor-pointer hover:text-white whitespace-nowrap select-none">
+                        style={{position:'sticky',top:0,zIndex:10,background:'#111827',minWidth:110}}
+                        className="px-3 py-2.5 text-left text-gray-400 font-semibold border-b border-gray-700 cursor-pointer hover:text-white whitespace-nowrap select-none">
                         {col.label}{ordenarPor===col.key&&<span className="ml-1 text-blue-400">{ordenDir==='asc'?'↑':'↓'}</span>}
                       </th>
                     ))}
@@ -392,8 +477,8 @@ export default function ReportesPage() {
                     const renderRow=(ot,i)=>(
                       <tr key={ot.id} className="border-b border-gray-800 hover:bg-gray-900 transition-colors" style={{background:i%2===0?'transparent':'#0a0f1e'}}>
                         {colsVisibles.map(col=>{
-                          if(col.key==='estado'){const e=ESTADO_COLORS[ot.estado]||ESTADO_COLORS[0];return(<td key={col.key} className="px-3 py-2 whitespace-nowrap"><span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:e.bg,color:e.text}}>{e.label}</span></td>)}
-                          return(<td key={col.key} className="px-3 py-2 text-gray-300 whitespace-nowrap">{getCellValue(ot,col.key)}</td>)
+                          if(col.key==='estado'){const e=ESTADO_COLORS[ot.estado]||ESTADO_COLORS[0];return(<td key={col.key} style={{minWidth:110}} className="px-3 py-2 whitespace-nowrap"><span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:e.bg,color:e.text}}>{e.label}</span></td>)}
+                          return(<td key={col.key} style={{minWidth:110}} className="px-3 py-2 text-gray-300 whitespace-nowrap">{getCellValue(ot,col.key)}</td>)
                         })}
                       </tr>
                     )

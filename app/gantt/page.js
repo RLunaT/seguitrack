@@ -1,13 +1,32 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { calcularCamposConEficiencia, getEstadoInfo, fmtFecha } from '@/lib/formulas'
+import { calcularCamposConEficiencia, getEstadoInfo, fmtFecha, generarSemanas } from '@/lib/formulas'
 
 const COLORES = { 1:'#22c55e', 2:'#f97316', 3:'#3b82f6', 4:'#eab308', 5:'#ef4444' }
 const MESES_CORTO = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 const URGENCIA = { 4:0, 5:1, 3:2, 2:3, 1:4 }
 const DIA_W = 20
 const DIAS_NOMBRE = ['D','L','M','X','J','V','S']
+
+// "2026-I" -> ene-jun, "2026-II" -> jul-dic (mismo criterio usado en el resto del sistema)
+function rangoDePeriodo(per) {
+  const m = String(per).match(/^(\d{4})-(I{1,2})$/)
+  if (!m) return null
+  const anio = parseInt(m[1])
+  return m[2] === 'II'
+    ? { ini: new Date(anio, 6, 1), fin: new Date(anio, 11, 31) }
+    : { ini: new Date(anio, 0, 1), fin: new Date(anio, 5, 30) }
+}
+
+// Nombre "familia" del módulo, sin el sufijo de período
+// (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
+function nombreBase(nombre) {
+  return (nombre || '').replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+}
+function claveGrupo(nombre) {
+  return nombreBase(nombre).toLowerCase()
+}
 
 export default function GanttGeneralPage() {
   const [ots, setOts] = useState([])
@@ -18,6 +37,16 @@ export default function GanttGeneralPage() {
   const [filtCont, setFiltCont] = useState('')
   const [filtEstado, setFiltEstado] = useState('')
   const [periodoIni, setPeriodoIni] = useState(() => { const h=new Date(); return new Date(h.getFullYear(), h.getMonth()-1, 1) })
+
+  // ── Filtros de línea de tiempo (igual criterio que el Dashboard) ──
+  const [verPor, setVerPor] = useState('semestral') // semestral | anual | mensual | semanal
+  const [periodoSelec, setPeriodoSelec] = useState('')
+  const [anioSelec, setAnioSelec] = useState('')
+  const [mesSelec, setMesSelec] = useState('')
+  const [semanaSelec, setSemanaSelec] = useState('')
+  const [periodoActual, setPeriodoActual] = useState('2026-I')
+  const [periodosList, setPeriodosList] = useState([])
+  const [autoNav, setAutoNav] = useState(true) // se apaga si el usuario navega manualmente
 
   const hoy = new Date(); hoy.setHours(0,0,0,0)
 
@@ -31,6 +60,10 @@ export default function GanttGeneralPage() {
       supabase.from('config_global').select('*'),
     ])
     const p = cfg?.find(x => x.clave === 'periodo')?.valor || '2026-I'
+    const listaCsv = cfg?.find(x => x.clave === 'periodos_lista')?.valor || p
+    const lista = [...new Set(listaCsv.split(',').map(s => s.trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a))
+    setPeriodoActual(p)
+    setPeriodosList(lista.length ? lista : [p])
     setModulos(m || [])
     setContratistas(c || [])
     const calc = (o || []).map(ot => {
@@ -39,16 +72,48 @@ export default function GanttGeneralPage() {
       return { ...ot, ...calcularCamposConEficiencia(ot, cont, p), _mod: mod, _cont: cont }
     })
     setOts(calc)
-    const primeras = calc.map(o => o.fecha_inicio).filter(Boolean).sort()
-    if (primeras.length) {
-      const d = new Date(primeras[0]+'T00:00:00')
-      setPeriodoIni(new Date(d.getFullYear(), d.getMonth(), 1))
-    }
     setLoading(false)
   }
 
+  // ── Cuántos meses mostrar de una vez, según la vista elegida ──
+  const mesesVisibles = verPor==='anual' ? 12 : verPor==='semestral' ? 6 : verPor==='mensual' ? 3 : 2
+
+  // ── Auto-navegar la línea de tiempo al cambiar de filtro ──
+  useEffect(() => {
+    if (!autoNav) return
+    if (verPor === 'semestral') {
+      const r = rangoDePeriodo(periodoSelec || periodoActual)
+      if (r) setPeriodoIni(r.ini)
+    } else if (verPor === 'anual') {
+      const anio = parseInt(anioSelec || (periodoSelec||periodoActual)?.split('-')[0]) || hoy.getFullYear()
+      setPeriodoIni(new Date(anio, 0, 1))
+    } else if (verPor === 'mensual') {
+      if (mesSelec) {
+        const [y, mm] = mesSelec.split('-').map(Number)
+        setPeriodoIni(new Date(y, mm - 2, 1)) // un mes antes, para dar contexto
+      } else {
+        const r = rangoDePeriodo(periodoSelec || periodoActual)
+        if (r) setPeriodoIni(r.ini)
+      }
+    } else if (verPor === 'semanal') {
+      const per = periodoSelec || periodoActual
+      if (semanaSelec) {
+        const anio = parseInt(per?.split('-')[0]) || hoy.getFullYear()
+        const sem = generarSemanas(anio).find(s => s.label === semanaSelec)
+        if (sem) {
+          const d = new Date(sem.inicio)
+          d.setMonth(d.getMonth() - 1)
+          setPeriodoIni(new Date(d.getFullYear(), d.getMonth(), 1))
+        }
+      } else {
+        const r = rangoDePeriodo(per)
+        if (r) setPeriodoIni(r.ini)
+      }
+    }
+  }, [verPor, periodoSelec, anioSelec, mesSelec, semanaSelec, periodoActual, autoNav])
+
   const periodoFin = new Date(periodoIni)
-  periodoFin.setMonth(periodoFin.getMonth() + 3)
+  periodoFin.setMonth(periodoFin.getMonth() + mesesVisibles)
   periodoFin.setDate(0)
 
   const dias = []
@@ -56,9 +121,10 @@ export default function GanttGeneralPage() {
   while (_d <= periodoFin) { dias.push(new Date(_d)); _d.setDate(_d.getDate()+1) }
   const gridW = dias.length * DIA_W
 
-  function navMes(delta) { const n=new Date(periodoIni); n.setMonth(n.getMonth()+delta); n.setDate(1); setPeriodoIni(n) }
-  function irAHoy() { setPeriodoIni(new Date(hoy.getFullYear(), hoy.getMonth()-1, 1)) }
+  function navMes(delta) { setAutoNav(false); const n=new Date(periodoIni); n.setMonth(n.getMonth()+delta); n.setDate(1); setPeriodoIni(n) }
+  function irAHoy() { setAutoNav(false); setPeriodoIni(new Date(hoy.getFullYear(), hoy.getMonth()-1, 1)) }
   function irAPrimera() {
+    setAutoNav(false)
     const primeras = ots.map(o=>o.fecha_inicio).filter(Boolean).sort()
     if (primeras.length) { const d=new Date(primeras[0]+'T00:00:00'); setPeriodoIni(new Date(d.getFullYear(), d.getMonth(), 1)) }
   }
@@ -74,15 +140,63 @@ export default function GanttGeneralPage() {
     else mesGrupos.push({ key:k, mes:d.getMonth(), year:d.getFullYear(), count:1 })
   })
 
+  // ── Filtro por línea de tiempo (semestre/año/mes/semana), igual criterio que el Dashboard ──
+  function pasaFiltroTiempo(o) {
+    if (verPor === 'anual') {
+      const anio = anioSelec || (periodoSelec||periodoActual)?.split('-')[0]
+      return !anio || o.periodo?.split('-')[0] === String(anio)
+    }
+    if (verPor === 'mensual' && mesSelec) {
+      return o.fecha_inicio?.slice(0,7) === mesSelec
+    }
+    if (verPor === 'semanal' && semanaSelec) {
+      return o.periodo === (periodoSelec||periodoActual) && o.semana === semanaSelec
+    }
+    // semestral, o mensual/semanal sin sub-filtro elegido: por período completo
+    return o.periodo === (periodoSelec || periodoActual)
+  }
+
+  // ── Módulos relevantes al rango de tiempo activo, agrupados por familia ──
+  // (evita mostrar "Avisos de Medidores" repetido por cada período, y en
+  // vista Anual fusiona el semestre I y II de un mismo módulo en un grupo)
+  function moduloEnRango(m) {
+    if (verPor === 'anual') {
+      const anio = anioSelec || (periodoSelec||periodoActual)?.split('-')[0]
+      return !anio || m.periodo?.split('-')[0] === String(anio)
+    }
+    return m.periodo === (periodoSelec || periodoActual)
+  }
+  const modulosEnRango = modulos.filter(moduloEnRango)
+  const familias = []
+  for (const m of modulosEnRango) {
+    const clave = claveGrupo(m.nombre)
+    let f = familias.find(x => x.clave === clave)
+    if (!f) { f = { clave, nombre: nombreBase(m.nombre), icono: m.icono, color: m.color, ids: [] }; familias.push(f) }
+    f.ids.push(m.id)
+  }
+  const modIdToClave = {}
+  modulos.forEach(m => { modIdToClave[m.id] = claveGrupo(m.nombre) })
+
   const otsFilt = ots.filter(o =>
-    (!filtMod  || o.modulo_id == filtMod) &&
+    pasaFiltroTiempo(o) &&
+    (!filtMod  || modIdToClave[o.modulo_id] === filtMod) &&
     (!filtCont || o.contratista_id == filtCont) &&
     (!filtEstado || String(o.estado) === filtEstado)
   )
 
-  const grupos = modulos.map(mod => ({
-    ...mod,
-    ots: otsFilt.filter(o => o.modulo_id === mod.id)
+  const mesesDisponibles = [...new Set(
+    ots.filter(o => o.periodo === (periodoSelec||periodoActual)).map(o => o.fecha_inicio?.slice(0,7)).filter(Boolean)
+  )].sort()
+  const semanasDisponibles = [...new Set(
+    ots.filter(o => o.periodo === (periodoSelec||periodoActual)).map(o => o.semana).filter(s => s && s.length < 15)
+  )].sort()
+
+  const grupos = familias.map(fam => ({
+    id: fam.clave,
+    nombre: fam.nombre,
+    icono: fam.icono,
+    color: fam.color,
+    ots: otsFilt.filter(o => fam.ids.includes(o.modulo_id))
       .sort((a,b) => { const ua=URGENCIA[a.estado]??5, ub=URGENCIA[b.estado]??5; return ua!==ub?ua-ub:(a.fecha_limite_expedientes||''). localeCompare(b.fecha_limite_expedientes||'') })
   })).filter(g => g.ots.length > 0)
 
@@ -96,6 +210,31 @@ export default function GanttGeneralPage() {
     if (w <= 0) return null
     return { x:x1, w, color:COLORES[ot.estado]||'#6b7280', pct:Math.round((ot.progreso||0)*100) }
   }
+
+  // ── Franja visual del rango filtrado, para ubicarlo de un vistazo en la línea de tiempo ──
+  function getBanda() {
+    if (verPor === 'anual') {
+      const anio = parseInt(anioSelec || (periodoSelec||periodoActual)?.split('-')[0]) || hoy.getFullYear()
+      return { desde: new Date(anio,0,1), hasta: new Date(anio,11,31), label: `Año ${anio}` }
+    }
+    if (verPor === 'mensual' && mesSelec) {
+      const [y, mm] = mesSelec.split('-').map(Number)
+      return { desde: new Date(y,mm-1,1), hasta: new Date(y,mm,0), label: `${MESES_CORTO[mm-1]} ${y}` }
+    }
+    if (verPor === 'semanal' && semanaSelec) {
+      const per = periodoSelec || periodoActual
+      const anio = parseInt(per?.split('-')[0]) || hoy.getFullYear()
+      const sem = generarSemanas(anio).find(s => s.label === semanaSelec)
+      return sem ? { desde: sem.inicio, hasta: sem.fin, label: semanaSelec } : null
+    }
+    const per = periodoSelec || periodoActual
+    const r = rangoDePeriodo(per)
+    return r ? { desde: r.ini, hasta: r.fin, label: per } : null
+  }
+  const banda = getBanda()
+  const bandaX1 = banda ? Math.max(0, Math.round((banda.desde-periodoIni)/86400000)*DIA_W) : 0
+  const bandaX2 = banda ? Math.min(gridW, Math.round((banda.hasta-periodoIni)/86400000)*DIA_W + DIA_W) : 0
+  const bandaVisible = banda && bandaX2 > bandaX1 && bandaX1 < gridW && bandaX2 > 0
 
   const INFO_W = 346
 
@@ -113,36 +252,89 @@ export default function GanttGeneralPage() {
               <span className="ml-3 text-gray-600">{otsFilt.length} OTs · {grupos.length} módulos</span>
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <select className="input-base text-xs" style={{width:150}} value={filtMod} onChange={e=>setFiltMod(e.target.value)}>
-              <option value="" disabled hidden>Módulo</option>
-              <option value="">Todos los módulos</option>
-              {modulos.map(m=><option key={m.id} value={m.id}>{m.icono} {m.nombre}</option>)}
-            </select>
-            <select className="input-base text-xs" style={{width:140}} value={filtCont} onChange={e=>setFiltCont(e.target.value)}>
-              <option value="" disabled hidden>Contratista</option>
-              <option value="">Todos los contratistas</option>
-              {contratistas.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-            <select className="input-base text-xs" style={{width:110}} value={filtEstado} onChange={e=>setFiltEstado(e.target.value)}>
-              <option value="" disabled hidden>Estado</option>
-              <option value="">Todos</option>
-              <option value="1">✓ A tiempo</option>
-              <option value="2">⚠ Tarde</option>
-              <option value="3">● En proceso</option>
-              <option value="4">⚡ Por vencer</option>
-              <option value="5">✗ Fuera plazo</option>
-            </select>
-            {(filtMod||filtCont||filtEstado) && (
-              <button className="text-xs px-2 py-1 rounded border border-red-900 text-red-400 hover:bg-red-950" onClick={()=>{setFiltMod('');setFiltCont('');setFiltEstado('')}}>✕</button>
-            )}
+          <div className="flex flex-col items-end gap-1">
             <div className="flex gap-1">
               <button className="btn-ghost text-xs px-2 py-1" onClick={irAPrimera} title="Ir a primera OT">⏮</button>
               <button className="btn-ghost text-xs px-2 py-1" onClick={()=>navMes(-1)}>◀</button>
               <button className="btn-ghost text-xs px-2 py-1" onClick={irAHoy} style={hoyVisible?{color:'#60a5fa',borderColor:'#3b82f6',background:'#1e3a5f'}:{}}>{hoyVisible?'● Hoy':'📍 Hoy'}</button>
               <button className="btn-ghost text-xs px-2 py-1" onClick={()=>navMes(1)}>▶</button>
             </div>
+            {!autoNav && (
+              <button className="text-xs px-2 py-1 rounded border border-blue-900 text-blue-400 hover:bg-blue-950 w-full" onClick={()=>setAutoNav(true)} title="Volver a centrar la línea de tiempo en el filtro">
+                🎯 Centrar en filtro
+              </button>
+            )}
           </div>
+        </div>
+
+        {/* ── Filtros de línea de tiempo ── */}
+        <div className="flex items-center gap-2 flex-wrap mt-3">
+          <select className="input-base text-xs" style={{width:110}} value={verPor}
+            onChange={e=>{setVerPor(e.target.value);setMesSelec('');setSemanaSelec('');setAnioSelec('');setAutoNav(true)}}>
+            <option value="semestral">Semestral</option>
+            <option value="anual">Anual</option>
+            <option value="mensual">Mensual</option>
+            <option value="semanal">Semanal</option>
+          </select>
+
+          {verPor==='anual' && (
+            <select className="input-base text-xs" style={{width:100}}
+              value={anioSelec||(periodoSelec||periodoActual)?.split('-')[0]||''}
+              onChange={e=>{setAnioSelec(e.target.value);setAutoNav(true)}}>
+              {[...new Set(periodosList.map(p=>p.split('-')[0]).filter(Boolean))].sort((a,b)=>b-a).map(a=>(
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          )}
+
+          {verPor!=='anual' && (
+            <select className="input-base text-xs" style={{width:110}}
+              value={periodoSelec||periodoActual}
+              onChange={e=>{setPeriodoSelec(e.target.value);setMesSelec('');setSemanaSelec('');setAutoNav(true)}}>
+              {periodosList.map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+          )}
+
+          {verPor==='mensual' && (
+            <select className="input-base text-xs" style={{width:130}} value={mesSelec}
+              onChange={e=>{setMesSelec(e.target.value);setAutoNav(true)}}>
+              <option value="">Todos los meses</option>
+              {mesesDisponibles.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+
+          {verPor==='semanal' && (
+            <select className="input-base text-xs" style={{width:130}} value={semanaSelec}
+              onChange={e=>{setSemanaSelec(e.target.value);setAutoNav(true)}}>
+              <option value="">Todas las semanas</option>
+              {semanasDisponibles.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+
+          <span className="text-gray-700">│</span>
+
+          <select className="input-base text-xs" style={{width:150}} value={filtMod} onChange={e=>setFiltMod(e.target.value)}>
+            <option value="" disabled hidden>Módulo</option>
+            <option value="">Todos los módulos</option>
+            {familias.map(f=><option key={f.clave} value={f.clave}>{f.icono} {f.nombre}</option>)}
+          </select>
+          <select className="input-base text-xs" style={{width:140}} value={filtCont} onChange={e=>setFiltCont(e.target.value)}>
+            <option value="" disabled hidden>Contratista</option>
+            <option value="">Todos los contratistas</option>
+            {contratistas.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+          </select>
+          <select className="input-base text-xs" style={{width:110}} value={filtEstado} onChange={e=>setFiltEstado(e.target.value)}>
+            <option value="" disabled hidden>Estado</option>
+            <option value="">Todos</option>
+            <option value="1">✓ A tiempo</option>
+            <option value="2">⚠ Tarde</option>
+            <option value="3">● En proceso</option>
+            <option value="4">⚡ Por vencer</option>
+            <option value="5">✗ Fuera plazo</option>
+          </select>
+          {(filtMod||filtCont||filtEstado) && (
+            <button className="text-xs px-2 py-1 rounded border border-red-900 text-red-400 hover:bg-red-950" onClick={()=>{setFiltMod('');setFiltCont('');setFiltEstado('')}}>✕</button>
+          )}
         </div>
       </div>
 
@@ -189,6 +381,9 @@ export default function GanttGeneralPage() {
                   <span className="text-xs text-gray-500" style={{width:66,flexShrink:0,textAlign:'center'}}>Inicio</span>
                   <span className="text-xs text-gray-500" style={{width:66,flexShrink:0,textAlign:'center'}}>Límite</span>
                 </div>
+                {banda && <div className="flex items-center border-b border-gray-800 px-3" style={{height:18,background:'#0a1220'}}>
+                  <span className="text-xs font-bold text-blue-400">🔎 {banda.label}</span>
+                </div>}
               </div>
               {grupos.map(grupo=>(
                 <div key={grupo.id}>
@@ -247,8 +442,16 @@ export default function GanttGeneralPage() {
                     )
                   })}
                 </div>
+                {/* Franja del rango filtrado — mismo alto que su equivalente en el panel izquierdo */}
+                <div style={{height:18,position:'relative',background:'#0a1220',borderBottom:'1px solid #1e293b'}}>
+                  {bandaVisible && (
+                    <div style={{position:'absolute',top:0,bottom:0,left:bandaX1,width:bandaX2-bandaX1,
+                      background:'#3b82f62a',borderLeft:'2px solid #3b82f6',borderRight:'2px solid #3b82f6'}}/>
+                  )}
+                </div>
               </div>
               <div style={{position:'relative',width:gridW}}>
+                {bandaVisible && <div style={{position:'absolute',top:0,bottom:0,left:bandaX1,width:bandaX2-bandaX1,background:'#3b82f611',zIndex:0,pointerEvents:'none'}}/>}
                 {hoyVisible&&<div style={{position:'absolute',top:0,bottom:0,left:hoyOffset+DIA_W/2,width:2,background:'#3b82f6',zIndex:10,opacity:0.9,pointerEvents:'none'}}/>}
                 {dias.map((d,i)=>d.getDay()===0||d.getDay()===6?<div key={i} style={{position:'absolute',top:0,bottom:0,left:i*DIA_W,width:DIA_W,background:'rgba(15,23,42,0.5)',pointerEvents:'none'}}/>:null)}
                 {grupos.map(grupo=>(
@@ -287,6 +490,7 @@ export default function GanttGeneralPage() {
         <div className="flex items-center gap-3 ml-auto">
           <div className="flex items-center gap-1.5"><div style={{width:2,height:12,background:'#3b82f6',borderRadius:1}}/><span className="text-gray-400">Hoy</span></div>
           <div className="flex items-center gap-1.5"><div className="w-3 h-3" style={{background:'#0f1a2e',border:'1px solid #1e293b'}}/><span className="text-gray-400">Fin semana</span></div>
+          <div className="flex items-center gap-1.5"><div className="w-3 h-3" style={{background:'#3b82f62a',border:'1px solid #3b82f6'}}/><span className="text-gray-400">Rango filtrado</span></div>
         </div>
       </div>
     </div>
