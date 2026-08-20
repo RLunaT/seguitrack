@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabase'
 
 // Feriados peruanos fijos (año variable)
@@ -173,7 +174,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
 
   const fmtD = d => d || '—'
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
       <div className="relative rounded-2xl border border-gray-700 p-6 w-full max-w-2xl overflow-y-auto" style={{ background: '#0f1a2e', maxHeight: '90vh' }}>
 
@@ -352,4 +353,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       </div>
     </div>
   )
+
+  if (typeof window === 'undefined') return null
+  return createPortal(modalContent, document.body)
 }
