@@ -54,7 +54,7 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
     // Cargar módulos
     const { data: mods } = await supabase
       .from('modulos')
-      .select('id, nombre, icono, color, periodo, tipo')
+      .select('id, nombre, icono, color, periodo, tipo, anio')
       .eq('activo', true)
       .order('orden')
 
@@ -82,19 +82,15 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
     const todosLosPeriodos = [
       ...new Set([...periodosDeOts, ...periodosGuardados])
     ].sort((a, b) => {
-      // Detectar si es período anual (ej. "2026") o semestral (ej. "2026-I")
+      // Ordenar por año desc, luego semestre desc (II > I)
       const parseP = p => {
-        const mSem = String(p).match(/^(\d{4})-(I{1,2})$/)
-        if (mSem) return [parseInt(mSem[1]), mSem[2] === 'II' ? 1 : 0, 1] // [año, sem, tipo=semestral]
-        const mAno = String(p).match(/^(\d{4})$/)
-        if (mAno) return [parseInt(mAno[1]), 2, 0] // anuales van primero dentro del año (sem=2 > 1)
-        return [0, 0, 0]
+        const m = String(p).match(/^(\d{4})-(I{1,2})$/)
+        if (!m) return [0, 0]
+        return [parseInt(m[1]), m[2] === 'II' ? 2 : 1]
       }
-      const [ya, sa, ta] = parseP(a)
-      const [yb, sb, tb] = parseP(b)
-      if (yb !== ya) return yb - ya   // año desc
-      if (sb !== sa) return sb - sa   // dentro del mismo año: anual > II > I
-      return ta - tb
+      const [ya, sa] = parseP(a)
+      const [yb, sb] = parseP(b)
+      return yb !== ya ? yb - ya : sb - sa
     })
 
     setModulos(mods || [])
@@ -352,15 +348,43 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
         ))}
       </div>
 
-      {/* Módulos por período */}
+      {/* Módulos */}
       <div className="px-2 flex-1">
         {!collapsed && (
           <div className="text-xs font-bold text-gray-600 uppercase tracking-wider px-3 py-2">Módulos</div>
         )}
 
-        {periodos.map(p => {
+        {/* Módulos anuales (tipo=inst) — sección fija, sin grupo de período */}
+        {modulos.filter(m => m.tipo === 'inst').map(mod => {
+          const activo = pathname === `/modulo-inst/${mod.id}`
+          return (
+            <Link key={mod.id} href={`/modulo-inst/${mod.id}`}>
+              <div
+                ref={activo ? activeRef : null}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer transition-all
+                  ${activo ? 'text-white border' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
+                style={activo
+                  ? { background: `${mod.color}20`, borderColor: `${mod.color}40`, color: mod.color }
+                  : {}}
+              >
+                <span className="text-base flex-shrink-0">{mod.icono || '📋'}</span>
+                {!collapsed && (
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium truncate text-xs block">{mod.nombre}</span>
+                    <span className="text-xs opacity-40">{mod.periodo}</span>
+                  </div>
+                )}
+              </div>
+            </Link>
+          )
+        })}
+
+        {/* Módulos semestrales — agrupados por período, excluyendo los anuales */}
+        {periodos.filter(p => /^\d{4}-(I{1,2})$/.test(p)).map(p => {
           const abierto     = periodosAbiertos[p]
           const tieneActivo = modulos.some(m => isModuloActivo(m.id, p))
+          const modulosPeriodo = modulos.filter(m => m.periodo === p && m.tipo !== 'inst')
+          if (modulosPeriodo.length === 0 && !abierto) return null
 
           return (
             <div key={p} className="mb-1">
@@ -384,13 +408,10 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
                 )}
               </button>
 
-              {(abierto || collapsed) && modulos.filter(m => m.periodo === p).map(mod => {
+              {(abierto || collapsed) && modulosPeriodo.map(mod => {
                 const activo = isModuloActivo(mod.id, p)
-                const href = mod.tipo === 'inst'
-                  ? `/modulo-inst/${mod.id}`
-                  : `/modulo/${mod.id}?periodo=${p}`
                 return (
-                  <Link key={mod.id} href={href}>
+                  <Link key={mod.id} href={`/modulo/${mod.id}?periodo=${p}`}>
                     <div
                       ref={activo ? activeRef : null}
                       className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer transition-all

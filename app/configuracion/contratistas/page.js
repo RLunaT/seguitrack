@@ -43,7 +43,11 @@ export default function ContratistasPage() {
   }
 
   // ── Familias de módulo (agrupan todos los períodos del mismo módulo) ──
+  // Los módulos tipo 'ot' se agrupan por nombre base (familia por período).
+  // Los módulos tipo 'inst' son su propia familia — no tienen períodos, son únicos.
   function idsDeFamilia(clave) {
+    const esInst = modulos.some(m => m.tipo === 'inst' && claveGrupo(m.nombre) === clave)
+    if (esInst) return modulos.filter(m => m.tipo === 'inst' && claveGrupo(m.nombre) === clave).map(m => m.id)
     return modulos.filter(m => m.tipo === 'ot' && claveGrupo(m.nombre) === clave).map(m => m.id)
   }
   function anchorId(clave) {
@@ -52,9 +56,9 @@ export default function ContratistasPage() {
   }
   function construirGrupos() {
     const map = {}
-    for (const m of modulos.filter(x => x.tipo === 'ot')) {
+    for (const m of modulos.filter(x => x.tipo === 'ot' || x.tipo === 'inst')) {
       const clave = claveGrupo(m.nombre)
-      if (!map[clave]) map[clave] = { clave, nombreBase: nombreBase(m.nombre), icono: m.icono, orden: m.orden ?? 0 }
+      if (!map[clave]) map[clave] = { clave, nombreBase: nombreBase(m.nombre), icono: m.icono, orden: m.orden ?? 0, tipo: m.tipo }
       else map[clave].orden = Math.min(map[clave].orden, m.orden ?? 0)
     }
     return Object.values(map).sort((a, b) => a.orden - b.orden)

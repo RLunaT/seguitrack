@@ -243,7 +243,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           <div className="p-4 grid grid-cols-3 gap-3" style={{ background: '#0a1220' }}>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
-              <input type="number" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+              <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
                 placeholder="0" value={form.cant_fact} onChange={e => set('cant_fact', e.target.value)} />
             </div>
             <div>
@@ -272,7 +272,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
             {form.fecha_reporte_fact && (
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Cant. entregada</label>
-                <input type="number" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
                   placeholder="0" value={form.cant_ent_fact} onChange={e => set('cant_ent_fact', e.target.value)} />
               </div>
             )}
@@ -293,7 +293,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           <div className="p-4 grid grid-cols-3 gap-3" style={{ background: '#0a1220' }}>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
-              <input type="number" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
+              <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
                 placeholder="0 (dejar vacío si no aplica)" value={form.cant_inst} onChange={e => set('cant_inst', e.target.value)} />
             </div>
             <div>
@@ -322,7 +322,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
             {form.fecha_reporte_inst && (
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Cant. entregada</label>
-                <input type="number" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
+                <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
                   placeholder="0" value={form.cant_ent_inst} onChange={e => set('cant_ent_inst', e.target.value)} />
               </div>
             )}
