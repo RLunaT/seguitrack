@@ -54,7 +54,7 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
     // Cargar módulos
     const { data: mods } = await supabase
       .from('modulos')
-      .select('id, nombre, icono, color, periodo')
+      .select('id, nombre, icono, color, periodo, tipo')
       .eq('activo', true)
       .order('orden')
 
@@ -82,15 +82,19 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
     const todosLosPeriodos = [
       ...new Set([...periodosDeOts, ...periodosGuardados])
     ].sort((a, b) => {
-      // Ordenar por año desc, luego semestre desc (II > I)
+      // Detectar si es período anual (ej. "2026") o semestral (ej. "2026-I")
       const parseP = p => {
-        const m = String(p).match(/^(\d{4})-(I{1,2})$/)
-        if (!m) return [0, 0]
-        return [parseInt(m[1]), m[2] === 'II' ? 2 : 1]
+        const mSem = String(p).match(/^(\d{4})-(I{1,2})$/)
+        if (mSem) return [parseInt(mSem[1]), mSem[2] === 'II' ? 1 : 0, 1] // [año, sem, tipo=semestral]
+        const mAno = String(p).match(/^(\d{4})$/)
+        if (mAno) return [parseInt(mAno[1]), 2, 0] // anuales van primero dentro del año (sem=2 > 1)
+        return [0, 0, 0]
       }
-      const [ya, sa] = parseP(a)
-      const [yb, sb] = parseP(b)
-      return yb !== ya ? yb - ya : sb - sa
+      const [ya, sa, ta] = parseP(a)
+      const [yb, sb, tb] = parseP(b)
+      if (yb !== ya) return yb - ya   // año desc
+      if (sb !== sa) return sb - sa   // dentro del mismo año: anual > II > I
+      return ta - tb
     })
 
     setModulos(mods || [])
@@ -382,8 +386,11 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
 
               {(abierto || collapsed) && modulos.filter(m => m.periodo === p).map(mod => {
                 const activo = isModuloActivo(mod.id, p)
+                const href = mod.tipo === 'inst'
+                  ? `/modulo-inst/${mod.id}`
+                  : `/modulo/${mod.id}?periodo=${p}`
                 return (
-                  <Link key={mod.id} href={`/modulo/${mod.id}?periodo=${p}`}>
+                  <Link key={mod.id} href={href}>
                     <div
                       ref={activo ? activeRef : null}
                       className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer transition-all
