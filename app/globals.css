@@ -264,3 +264,8 @@ body {
   z-index: 10;
   pointer-events: none;
 }
+
+/* Celdas con rowspan en módulo de Instalaciones Nuevas — sin borde interno */
+.tabla-base td.inst-rowspan {
+  border-bottom: none !important;
+}

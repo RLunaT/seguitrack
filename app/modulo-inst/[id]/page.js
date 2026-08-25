@@ -39,8 +39,6 @@ function contratoVigenteEnRango(contrato, rango) {
 }
 
 // ── Columnas base — Instalaciones Nuevas ─────────────────────
-// Sin semana, progreso ni eficiencia (no aplican a este módulo).
-// numero_registro muestra el N° OT visual (OT-01, OT-02...).
 const CAMPOS_BASE = [
   { key: 'numero_registro',    label: 'N° OT',           always: true  },
   { key: 'contratista',        label: 'Contratista',     always: true  },
@@ -101,7 +99,7 @@ export default function ModuloPage() {
     if (typeof window === 'undefined') return {}
     try { return JSON.parse(localStorage.getItem(`cols_${id}`) || '{}') } catch { return {} }
   })
-  const [sortCfg, setSortCfg] = useState({ key: 'numero_registro', dir: 'asc' })
+  const [sortCfg, setSortCfg] = useState({ key: 'numero_ot', dir: 'asc' })
   const [camposTabOrder, setCamposTabOrder] = useState(null)
   const [columnFilters, setColumnFilters] = useState({})
 
@@ -273,7 +271,7 @@ export default function ModuloPage() {
     // achique tanto que los botones queden tapados (ver fix más abajo,
     // donde se les quita el handle de resize en el encabezado).
     if (key === 'accion_doc')      return 60
-    if (key === 'acciones')        return 130
+    if (key === 'acciones')        return 115
     return 110
   }
 
@@ -296,7 +294,7 @@ export default function ModuloPage() {
   }
 
   const otsFiltradas = ots.filter(ot => {
-    const idBusca = esOT ? `${ot.numero_ot} ${ot.numero_registro}` : ot.numero_registro
+    const idBusca = esOT ? `${ot.numero_ot}` : ot.numero_registro
     const txt = `${idBusca} ${ot._cont?.nombre || ''} ${ot.actividad || ''} ${ot.motivo_ot || ''} ${ot.semana || ''} ${ot.observaciones || ''}`.toLowerCase()
     if (buscar && !txt.includes(buscar.toLowerCase())) return false
     if (filtContratista && String(ot.contratista_id) !== filtContratista) return false
@@ -319,7 +317,7 @@ export default function ModuloPage() {
   }).slice().sort((a, b) => {
     const { key, dir } = sortCfg
     const mult = dir === 'asc' ? 1 : -1
-    if (key === 'numero_registro') return mult * (parseInt(a.numero_registro) - parseInt(b.numero_registro))
+    if (key === 'numero_registro') return mult * (parseInt(a.numero_ot) - parseInt(b.numero_ot))
     if (key === 'fecha_inicio') return mult * (a.fecha_inicio || '').localeCompare(b.fecha_inicio || '')
     if (key === 'fecha_limite') return mult * (a.fecha_limite_expedientes || '').localeCompare(b.fecha_limite_expedientes || '')
     if (key === 'fecha_reporte') return mult * (a.fecha_reporte || '').localeCompare(b.fecha_reporte || '')
@@ -581,7 +579,7 @@ export default function ModuloPage() {
   function buildDocForm(ot, cont, codigoOT, hoy) {
     const de = ot.datos_extra || {}
     return {
-      numero_ot:          ot.numero_ot || ot.numero_registro,
+      numero_ot:          ot.numero_ot,
       codigo_ot:          de.doc_codigo_ot    || codigoOT,
       contrato:           cont?.contrato || '',
       semana:             ot.semana || '',
@@ -930,7 +928,10 @@ export default function ModuloPage() {
                         if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
                         // Doc y Acciones: sin handle de resize — ancho fijo siempre,
                         // para que los botones nunca queden tapados.
-                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative'}}>Acciones</th>
+                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative',borderLeft:'2px solid #1e3a5f',background:'#0d1e36',color:'#60a5fa'}}>Acciones</th>
+                        if (col.key === 'inst_seguim') return null
+                        if (col.key === 'inst_doc') return null
+                        if (col.key === 'inst_editar') return null
                         if (col.key === 'accion_doc') return <th key="accdoc" style={{position:'relative'}}>Doc</th>
                         if (col.key.startsWith('extra_')) return <th key={col.key} style={{position:'relative'}}>{col.label}<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
                         if (['contratista','semana','fecha_inicio','fecha_limite','fecha_reporte','cantidad','estado'].includes(col.key))
@@ -966,38 +967,29 @@ export default function ModuloPage() {
 
                         return [fact, inst].filter(Boolean).map((ot, idx) => {
                           const esFirst = idx === 0
+                          const esLast = idx === (inst ? 1 : 0)
                           const info = getEstadoInfo(ot.estado)
                           const pct = Math.round((ot.progreso || 0) * 100)
                           const efInfo = getEficienciaLabel(ot.eficiencia)
+                          const rowBorder = esLast ? '2px solid #1e3a5f' : 'none'
                           return (
-                            <tr key={ot.id}>
+                            <tr key={ot.id} className={!esLast ? 'ot-mid-row' : ''}>
                               {modoEliminar && esFirst && celdaSpan(<input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ot.id)} onChange={() => toggleSeleccion(ot.id)} />)}
                               {todasColsOrdenadas.map(col => {
                                 const k = col.key
                                 // Columnas con rowspan — solo se renderizan en la primera fila
-                                if (['numero_registro','contratista','contrato','acciones'].includes(k)) {
+                                if (['numero_registro','contratista','contrato'].includes(k)) {
                                   if (!esFirst) return null
                                   if (k === 'numero_registro') return <td key={k} rowSpan={rowSpan} style={{minWidth:90,width:90,padding:'4px 8px',textAlign:'center',background:'#0d1526',borderRight:'2px solid #1e293b',position:'sticky',left:0,zIndex:1,borderBottom,verticalAlign:'middle'}}><span className="font-mono font-bold text-blue-400" style={{fontSize:'13px'}}>{`OT-${String(fact.numero_ot).padStart(2,'0')}`}</span></td>
                                   if (k === 'contratista') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:fact._cont?.color||'#666'}}/><span className="text-xs">{fact._cont?.nombre||'—'}</span></div></td>
                                   if (k === 'contrato') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><span className="text-xs text-gray-500">{fact.contrato||fact._cont?.contrato||'—'}</span></td>
-                                  if (k === 'acciones') return (
-                                    <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle',padding:'4px 6px'}}>
-                                      {!modoEliminar ? (
-                                        <div className="flex flex-col gap-1">
-                                          <div className="flex gap-1">
-                                            <button className="btn-ghost text-xs py-1 px-2" title="Generar documento" onClick={()=>generarWordDirecto(fact)}>📄</button>
-                                            <button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(fact);setModalOpen(true)}}>✏️</button>
-                                          </div>
-                                          <div className="flex flex-col gap-0.5">
-                                            <button className="btn-ghost text-xs py-0.5 px-2 text-left" style={{color:'#06b6d4',borderColor:'#083344',fontSize:'10px'}} title="Seguimiento Factibilidades" onClick={()=>{setOtSeg(fact);setModalSeg(true)}}>📊 Fact.</button>
-                                            {inst && <button className="btn-ghost text-xs py-0.5 px-2 text-left" style={{color:'#c084fc',borderColor:'#1a0f33',fontSize:'10px'}} title="Seguimiento Instalaciones" onClick={()=>{setOtSeg(inst);setModalSeg(true)}}>📊 Inst.</button>}
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>
-                                      )}
-                                    </td>
-                                  )
+                                }
+                                if (k === 'inst_seguim') return null
+                                if (k === 'inst_doc') return null
+                                if (k === 'inst_editar') return null
+                                if (k === 'acciones') {
+                                  if (!esFirst) return null
+                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:115,minWidth:115}}><div className="flex gap-1">{!modoEliminar?<><button className="btn-ghost text-xs py-1 px-2" title="Generar documento" onClick={()=>generarWordDirecto(fact)}>📄</button><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg(fact);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(fact);setModalOpen(true)}}>✏️</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esInst = ot.actividad === 'instalaciones'
@@ -1025,7 +1017,6 @@ export default function ModuloPage() {
                                 if (k === 'eficiencia') return <td key={k} className="text-xs font-mono font-semibold" style={{color:efInfo.color}}>{efInfo.label}</td>
                                 if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<BotonDocumento onWord={()=>generarWordDirecto(ot)} onPdf={()=>generarPdfDirecto(ot)}/>:'—'}</td>
                                 if (k.startsWith('extra_')) { const campo = camposExtra.find(c => `extra_${c.id}` === k); return <td key={k} className="text-xs text-gray-400">{campo?(ot.datos_extra?.[campo.clave]??'—'):'—'}</td> }
-                                if (k === 'acciones') return null
                                 return null
                               })}
                             </tr>
