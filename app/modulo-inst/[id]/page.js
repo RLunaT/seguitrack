@@ -429,72 +429,72 @@ export default function ModuloPage() {
 
   // Genera y descarga el Word directamente sin mostrar modal
   async function generarWordDirecto(ot) {
+    // Buscar el par completo de actividades para esta OT
+    const numeroOt = ot.numero_ot
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'factibilidades') || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'instalaciones')
     const cont = contratistas.find(c => c.id === ot.contratista_id)
-    const hoy  = new Date().toISOString().slice(0, 10)
-    const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
 
-    // Formato fechas para el Word
+    const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+    const DIAS  = ['do','lu','ma','mi','ju','vi','sá']
+
     function fmtEntrega(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')
-      const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
-      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
+      return String(dt.getDate()).padStart(2,'0') + '-' + MESES[dt.getMonth()] + '-' + dt.getFullYear()
     }
-    function fmtDia(d) {
+    function fmtTabla(d) {
       if (!d) return ''
       const dt = new Date(d + 'T00:00:00')
-      const D = ['dom','lun','mar','mié','jue','vie','sáb']
-      return D[dt.getDay()] + ' ' + String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear()
+      return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
     }
-    // Evitar duplicar "Contrato" si ya está en el texto
-    function limpiarContrato(c) {
-      if (!c) return ''
-      return c.replace(/^contrato\s+/i, '').trim()
+    function diasHab(ini, fin) {
+      if (!ini || !fin) return ''
+      const d1 = new Date(ini + 'T00:00:00'), d2 = new Date(fin + 'T00:00:00')
+      let dias = 0, cur = new Date(d1)
+      while (cur <= d2) { if (cur.getDay()!==0&&cur.getDay()!==6) dias++; cur.setDate(cur.getDate()+1) }
+      return `${dias} días`
     }
+
+    const vars = {
+      numero_ot:    String(numeroOt || ''),
+      contrato:     (ot.contrato || cont?.contrato || '').replace(/^contrato\s+/i,'').trim(),
+      fecha_entrega: fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      editado_por:  modulo?.plantilla_editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      fi_fact:      fmtTabla(fact.fecha_inicio),
+      ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
+      fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
+      plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
+      cant_fact:    String(fact.cantidad_programada || ''),
+      fi_inst:      fmtTabla(inst?.fecha_inicio),
+      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos),
+      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes),
+      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
+      cant_inst:    String(inst?.cantidad_programada || ''),
+      detalle_fact: fact.datos_extra?.detalle_fact || 'Adjunto listado OT por correo electrónico',
+      detalle_inst: inst?.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico',
+    }
+
+    // Determinar qué template usar (normal o individualización)
+    const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
+    const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
 
     try {
-      const payload = {
-        numero_ot:          String(data.numero_ot||''),
-        codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
-        contrato:           limpiarContrato(data.contrato),
-        fecha_entrega:      fmtEntrega(data.fecha_entrega),
-        fecha_inicio:       fmtDia(data.fecha_inicio),
-        fecha_fin:          fmtDia(data.fecha_fin),
-        fecha_limite:       fmtDia(data.fecha_limite),
-        dias_plazo:         String(data.dias_plazo||'1'),
-        cantidad:           String(data.cantidad||''),
-        actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
-        actividad_label:    String(data.actividad_label||''),
-        cumplimiento:       String(data.cumplimiento||''),
-        editado_por:        String(data.editado_por||''),
-        coordinador:        String(data.coordinador||''),
-        contratista_nombre: String(data.contratista_nombre||''),
-        motivo_extra:       String(data.motivo_extra||''),
-        semana:             String(data.semana||''),
-        periodo:            String(data.periodo||periodo||''),
-        titulo:             String(data.titulo||''),
-      }
-      const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
-      if (!res.ok) { alert('Error al generar Word'); return }
+      const res = await fetch('/api/genword-inst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template, vars })
+      })
+      if (!res.ok) { alert('Error al generar Word: ' + await res.text()); return }
       const blob = await res.blob()
-
-      // Extrae el nombre real del archivo desde el header — window.open()
-      // ignora el Content-Disposition y el navegador asigna un nombre
-      // aleatorio (UUID) en vez del nombre descriptivo generado por la API.
       const disposition = res.headers.get('Content-Disposition') || ''
-      // Prioriza filename* (UTF-8, con tildes/símbolos correctos) sobre el
-      // filename="" ASCII de respaldo — aparece antes en el header.
       const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
       const m = disposition.match(/filename="([^"]+)"/)
-      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT_${payload.numero_ot}_${ot.actividad}.docx`)
-
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${vars.numero_ot}_Instalaciones.docx`)
       const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
     } catch(e) { alert('Error: ' + e.message) }
   }
@@ -502,66 +502,43 @@ export default function ModuloPage() {
   // Genera y descarga el PDF directamente sin mostrar modal — mismo dato
   // de origen que generarWordDirecto, mismo manejo de nombre de archivo.
   async function generarPdfDirecto(ot) {
+    const numeroOt = ot.numero_ot
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'factibilidades') || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'instalaciones')
     const cont = contratistas.find(c => c.id === ot.contratista_id)
-    const hoy  = new Date().toISOString().slice(0, 10)
-    const data = buildDocForm(ot, cont, generarCodigoOT(ot.semana, periodo), hoy)
 
-    function fmtEntrega(d) {
-      if (!d) return ''
-      const dt = new Date(d + 'T00:00:00')
-      const M = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
-      return String(dt.getDate()).padStart(2,'0') + '-' + M[dt.getMonth()] + '-' + dt.getFullYear()
-    }
-    function fmtDia(d) {
-      if (!d) return ''
-      const dt = new Date(d + 'T00:00:00')
-      const D = ['dom','lun','mar','mié','jue','vie','sáb']
-      return D[dt.getDay()] + ' ' + String(dt.getDate()).padStart(2,'0') + '/' + String(dt.getMonth()+1).padStart(2,'0') + '/' + dt.getFullYear()
-    }
-    function limpiarContrato(c) {
-      if (!c) return ''
-      return c.replace(/^contrato\s+/i, '').trim()
-    }
+    const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+    const DIAS  = ['do','lu','ma','mi','ju','vi','sá']
+    function fmtEntrega(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return String(dt.getDate()).padStart(2,'0')+'-'+MESES[dt.getMonth()]+'-'+dt.getFullYear() }
+    function fmtTabla(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}` }
+    function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); let dias=0,cur=new Date(d1); while(cur<=d2){if(cur.getDay()!==0&&cur.getDay()!==6)dias++;cur.setDate(cur.getDate()+1)} return `${dias} días` }
 
+    const vars = {
+      numero_ot:    String(numeroOt||''),
+      contrato:     (ot.contrato||cont?.contrato||'').replace(/^contrato\s+/i,'').trim(),
+      fecha_entrega: fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      editado_por:  modulo?.plantilla_editado_por||'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      fi_fact: fmtTabla(fact.fecha_inicio), ff_fact: fmtTabla(fact.fecha_fin_trabajos), fl_fact: fmtTabla(fact.fecha_limite_expedientes),
+      plazo_fact: diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos), cant_fact: String(fact.cantidad_programada||''),
+      fi_inst: fmtTabla(inst?.fecha_inicio), ff_inst: fmtTabla(inst?.fecha_fin_trabajos), fl_inst: fmtTabla(inst?.fecha_limite_expedientes),
+      plazo_inst: diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos), cant_inst: String(inst?.cantidad_programada||''),
+      detalle_fact: fact.datos_extra?.detalle_fact||'Adjunto listado OT por correo electrónico',
+      detalle_inst: inst?.datos_extra?.detalle_inst||'Adjunto listado OT por correo electrónico',
+    }
+    const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
+    const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
     try {
-      const payload = {
-        numero_ot:          String(data.numero_ot||''),
-        codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
-        contrato:           limpiarContrato(data.contrato),
-        fecha_entrega:      fmtEntrega(data.fecha_entrega),
-        fecha_inicio:       fmtDia(data.fecha_inicio),
-        fecha_fin:          fmtDia(data.fecha_fin),
-        fecha_limite:       fmtDia(data.fecha_limite),
-        dias_plazo:         String(data.dias_plazo||'1'),
-        cantidad:           String(data.cantidad||''),
-        actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
-        actividad_label:    String(data.actividad_label||''),
-        cumplimiento:       String(data.cumplimiento||''),
-        editado_por:        String(data.editado_por||''),
-        coordinador:        String(data.coordinador||''),
-        contratista_nombre: String(data.contratista_nombre||''),
-        motivo_extra:       String(data.motivo_extra||''),
-        semana:             String(data.semana||''),
-        periodo:            String(data.periodo||periodo||''),
-        titulo:             String(data.titulo||''),
-      }
-      const res = await fetch('/api/genpdf', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
-      if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
-      const arrayBuffer = await res.arrayBuffer()
-      const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
-
-      const disposition = res.headers.get('Content-Disposition') || ''
-      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
-      const m = disposition.match(/filename="([^"]+)"/)
-      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT_${payload.numero_ot}_${ot.actividad}.pdf`)
-
+      const res = await fetch('/api/genword-inst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template, vars, pdf: true })
+      })
+      if (!res.ok) { alert('Error al generar PDF: ' + await res.text()); return }
+      const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
-      const a   = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
+      const a = document.createElement('a')
+      a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.pdf`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
     } catch(e) { alert('Error: ' + e.message) }
   }
@@ -989,7 +966,7 @@ export default function ModuloPage() {
                                 if (k === 'inst_editar') return null
                                 if (k === 'acciones') {
                                   if (!esFirst) return null
-                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:115,minWidth:115}}><div className="flex gap-1">{!modoEliminar?<><button className="btn-ghost text-xs py-1 px-2" title="Generar documento" onClick={()=>generarWordDirecto(fact)}>📄</button><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg(fact);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(fact);setModalOpen(true)}}>✏️</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
+                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:115,minWidth:115}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact)} onPdf={()=>generarPdfDirecto(fact)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg(fact);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(fact);setModalOpen(true)}}>✏️</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esInst = ot.actividad === 'instalaciones'

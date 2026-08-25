@@ -2,67 +2,69 @@ import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import PizZip from 'pizzip'
+import Docxtemplater from 'docxtemplater'
 
-function escapeXml(str) {
-  if (!str && str !== 0) return ''
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-}
+export const maxDuration = 60
 
-// Repara placeholders fragmentados por Word en múltiples w:t
-function fixSplitPlaceholders(xml) {
-  // Estrategia: extraer solo el texto de los w:t y reunir placeholders {{...}}
-  // que quedaron partidos entre varios runs
-  let result = xml
-  // Regex: encuentra secuencias de w:t que juntas forman {{algo}}
-  result = result.replace(
-    /\{\{([^}]*)\}\}/g,
-    (m) => m // placeholders ya completos, dejar igual
-  )
-  // Reparar {{partido en dos w:t: "{{" en uno, "variable}}" en otro
-  result = result.replace(
-    /<w:t([^>]*)>\{\{<\/w:t>(<\/w:r>[\s\S]*?<w:r[^>]*>[\s\S]*?)<w:t([^>]*)>([^<]+)\}\}<\/w:t>/g,
-    (m, a1, mid, a2, key) => `<w:t${a1}>{{${key}}}</w:t>`
-  )
-  return result
-}
-
-function rellenarTemplate(xml, vars) {
-  let out = fixSplitPlaceholders(xml)
-  for (const [k, v] of Object.entries(vars)) {
-    const escaped = escapeXml(v)
-    out = out.replaceAll(`{{${k}}}`, escaped)
-  }
-  return out
-}
+const GOTENBERG = process.env.GOTENBERG_URL || 'https://seguitrack-gotenberg.onrender.com'
 
 export async function POST(request) {
   try {
-    const { template, vars } = await request.json()
+    const { template, vars, pdf = false } = await request.json()
 
-    const templatePath = path.join(process.cwd(), 'public', template)
+    const templatePath = path.join(process.cwd(), 'public', 'templates', template)
     if (!fs.existsSync(templatePath)) {
       return NextResponse.json({ error: `Template no encontrado: ${template}` }, { status: 404 })
     }
 
     const buf = fs.readFileSync(templatePath)
     const zip = new PizZip(buf)
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: { start: '{{', end: '}}' },
+    })
+    doc.render(vars || {})
 
-    const docXml = zip.file('word/document.xml').asText()
-    const filled = rellenarTemplate(docXml, vars || {})
-    zip.file('word/document.xml', filled)
+    const wordBuf = doc.getZip().generate({
+      type: 'nodebuffer',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
 
-    const out = zip.generate({ type: 'nodebuffer', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+    const nombreBase = `OT-${String(vars?.numero_ot||'doc')}_Instalaciones_Nuevas`
 
-    return new NextResponse(out, {
+    if (!pdf) {
+      return new NextResponse(wordBuf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="${nombreBase}.docx"`,
+        },
+      })
+    }
+
+    // Convertir a PDF via Gotenberg en el servidor
+    const form = new FormData()
+    form.append('files', new Blob([wordBuf], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    }), 'doc.docx')
+
+    const pdfRes = await fetch(`${GOTENBERG}/forms/libreoffice/convert`, {
+      method: 'POST',
+      body: form,
+    })
+
+    if (!pdfRes.ok) {
+      const txt = await pdfRes.text()
+      return NextResponse.json({ error: `Gotenberg error: ${txt}` }, { status: 500 })
+    }
+
+    const pdfBuf = Buffer.from(await pdfRes.arrayBuffer())
+    return new NextResponse(pdfBuf, {
       status: 200,
       headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="OT-${escapeXml(vars?.numero_ot || 'doc')}_Instalaciones_Nuevas.docx"`,
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${nombreBase}.pdf"`,
       },
     })
   } catch (e) {
