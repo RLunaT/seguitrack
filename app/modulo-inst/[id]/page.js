@@ -113,7 +113,7 @@ export default function ModuloPage() {
   const cargar = useCallback(async () => {
     const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
-      supabase.from('ots').select('*').eq('modulo_id', id).eq('periodo', anioSelec).order('numero_ot'),
+      supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).order('numero_ot'),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
     ])
@@ -456,22 +456,32 @@ export default function ModuloPage() {
       return `${dias} días`
     }
 
+    const contWord = contratistas.find(c => c.id === ot.contratista_id)
+    const contNombre = contWord?.nombre || ''
+    const firmaSupDefault = contNombre.toLowerCase().includes('san pedro')
+      ? 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+      : contNombre ? `SUPERVISOR "${contNombre}"` : 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+
     const vars = {
-      numero_ot:    String(numeroOt || ''),
-      contrato:     (ot.contrato || cont?.contrato || '').replace(/^contrato\s+/i,'').trim(),
-      fecha_entrega: fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
-      editado_por:  modulo?.plantilla_editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      numero_ot:          String(numeroOt || ''),
+      contrato:           (ot.contrato || contWord?.contrato || '').replace(/^contrato\s+/i,'').trim(),
+      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      titulo:             fact.datos_extra?.doc_titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
+      editado_por:        fact.datos_extra?.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
+      firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
+      firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupDefault,
       fi_fact:      fmtTabla(fact.fecha_inicio),
       ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
       fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
       cant_fact:    String(fact.cantidad_programada || ''),
+      detalle_fact: fact.datos_extra?.detalle_fact || 'Adjunto listado OT por correo electrónico',
       fi_inst:      fmtTabla(inst?.fecha_inicio),
       ff_inst:      fmtTabla(inst?.fecha_fin_trabajos),
       fl_inst:      fmtTabla(inst?.fecha_limite_expedientes),
       plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
       cant_inst:    String(inst?.cantidad_programada || ''),
-      detalle_fact: fact.datos_extra?.detalle_fact || 'Adjunto listado OT por correo electrónico',
       detalle_inst: inst?.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico',
     }
 
@@ -513,16 +523,26 @@ export default function ModuloPage() {
     function fmtTabla(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}` }
     function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); let dias=0,cur=new Date(d1); while(cur<=d2){if(cur.getDay()!==0&&cur.getDay()!==6)dias++;cur.setDate(cur.getDate()+1)} return `${dias} días` }
 
+    const contPdf = contratistas.find(c => c.id === ot.contratista_id)
+    const contNombrePdf = contPdf?.nombre || ''
+    const firmaSupPdf = contNombrePdf.toLowerCase().includes('san pedro')
+      ? 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+      : contNombrePdf ? `SUPERVISOR "${contNombrePdf}"` : 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+
     const vars = {
-      numero_ot:    String(numeroOt||''),
-      contrato:     (ot.contrato||cont?.contrato||'').replace(/^contrato\s+/i,'').trim(),
-      fecha_entrega: fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
-      editado_por:  modulo?.plantilla_editado_por||'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      numero_ot:          String(numeroOt||''),
+      contrato:           (ot.contrato||contPdf?.contrato||'').replace(/^contrato\s+/i,'').trim(),
+      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      titulo:             fact.datos_extra?.doc_titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
+      editado_por:        fact.datos_extra?.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
+      firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
+      firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupPdf,
       fi_fact: fmtTabla(fact.fecha_inicio), ff_fact: fmtTabla(fact.fecha_fin_trabajos), fl_fact: fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact: diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos), cant_fact: String(fact.cantidad_programada||''),
+      detalle_fact: fact.datos_extra?.detalle_fact||'Adjunto listado OT por correo electrónico',
       fi_inst: fmtTabla(inst?.fecha_inicio), ff_inst: fmtTabla(inst?.fecha_fin_trabajos), fl_inst: fmtTabla(inst?.fecha_limite_expedientes),
       plazo_inst: diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos), cant_inst: String(inst?.cantidad_programada||''),
-      detalle_fact: fact.datos_extra?.detalle_fact||'Adjunto listado OT por correo electrónico',
       detalle_inst: inst?.datos_extra?.detalle_inst||'Adjunto listado OT por correo electrónico',
     }
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
@@ -1105,8 +1125,8 @@ export default function ModuloPage() {
           contratistas={contratistas}
           par={editando ? ots.filter(o => o.numero_ot === editando.numero_ot) : null}
           anioActivo={anioSelec}
-          onClose={() => setModalOpen(false)}
-          onSaved={() => { setModalOpen(false); cargar() }}
+          onClose={() => { setModalOpen(false); cargar() }}
+          onSaved={(esNueva) => { if (!esNueva) { setModalOpen(false) }; cargar() }}
         />
       )}
 

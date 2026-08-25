@@ -80,12 +80,17 @@ const FORM_DEFAULT = {
   cant_ent_inst:  '',
 }
 
-export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved }) {
+export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved, anioActivo }) {
   const esEdicion = !!par
   const [form, setForm] = useState(FORM_DEFAULT)
   const [fechas, setFechas] = useState({ fact: {}, inst: {} })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [guardado, setGuardado] = useState(false)
+  const [docOpen, setDocOpen] = useState(true)
+  const [otGuardada, setOtGuardada] = useState(null) // { fact, inst }
+  const [editadoPor, setEditadoPor] = useState('ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES')
+  const [generandoDoc, setGenerandoDoc] = useState(false)
 
   useEffect(() => {
     if (esEdicion && par?.length) {
@@ -126,7 +131,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       contratista_id: parseInt(form.contratista_id),
       contrato:       form.contrato,
       numero_ot:      parseInt(form.numero_ot) || form.numero_ot,
-      periodo:        modulo?.periodo,
+      periodo:        anioActivo || String(new Date().getFullYear()),
       datos_extra:    { doc_fecha_entrega: form.fecha_entrega },
     }
 
@@ -134,11 +139,9 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       ...baseOT,
       actividad:             'factibilidades',
       cantidad_programada:   parseInt(form.cant_fact) || null,
-      fecha_inicio:          fechas.fact?.inicio || null,
-      fecha_fin_trabajos:    fechas.fact?.fin || null,
-      fecha_limite_expedientes: fechas.fact?.limite || null,
-      fecha_reporte:         form.fecha_reporte_fact || null,
-      cantidad_entregada:    form.fecha_reporte_fact ? (parseInt(form.cant_ent_fact) || null) : null,
+      fecha_inicio:          form.fi_fact_manual || fechas.fact?.inicio || null,
+      fecha_fin_trabajos:    form.ff_fact_manual || fechas.fact?.fin || null,
+      fecha_limite_expedientes: form.fl_fact_manual || fechas.fact?.limite || null,
       observaciones:         form.obs_fact || null,
     }
 
@@ -146,11 +149,9 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       ...baseOT,
       actividad:             'instalaciones',
       cantidad_programada:   parseInt(form.cant_inst) || null,
-      fecha_inicio:          fechas.inst?.inicio || null,
-      fecha_fin_trabajos:    fechas.inst?.fin || null,
-      fecha_limite_expedientes: fechas.inst?.limite || null,
-      fecha_reporte:         form.fecha_reporte_inst || null,
-      cantidad_entregada:    form.fecha_reporte_inst ? (parseInt(form.cant_ent_inst) || null) : null,
+      fecha_inicio:          form.fi_inst_manual || fechas.inst?.inicio || null,
+      fecha_fin_trabajos:    form.ff_inst_manual || fechas.inst?.fin || null,
+      fecha_limite_expedientes: form.fl_inst_manual || fechas.inst?.limite || null,
       observaciones:         form.obs_inst || null,
     }
 
@@ -161,10 +162,16 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
         if (factId) await supabase.from('ots').update(otFact).eq('id', factId)
         if (instId) await supabase.from('ots').update(otInst).eq('id', instId)
         if (!instId && form.cant_inst) await supabase.from('ots').insert(otInst)
+        onSaved()
       } else {
-        await supabase.from('ots').insert([otFact, ...(form.cant_inst ? [otInst] : [])])
+        const inserts = [otFact, ...(form.cant_inst ? [otInst] : [])]
+        const { data: inserted } = await supabase.from('ots').insert(inserts).select()
+        const fact = inserted?.find(o => o.actividad === 'factibilidades')
+        const inst = inserted?.find(o => o.actividad === 'instalaciones')
+        setOtGuardada({ fact, inst })
+        setGuardado(true)
+        onSaved(true) // refresca tabla sin cerrar modal
       }
-      onSaved()
     } catch (e) {
       setError(e.message || 'Error al guardar')
     } finally {
@@ -173,6 +180,167 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   }
 
   const fmtD = d => d || '—'
+
+  const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+  const DIAS  = ['do','lu','ma','mi','ju','vi','sá']
+  function fmtEntrega(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${String(dt.getDate()).padStart(2,'0')}-${MESES[dt.getMonth()]}-${dt.getFullYear()}` }
+  function fmtTabla(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}` }
+  function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); let dias=0,cur=new Date(d1); while(cur<=d2){if(cur.getDay()!==0&&cur.getDay()!==6)dias++;cur.setDate(cur.getDate()+1)} return `${dias} días` }
+
+  async function generarDoc(pdf = false, docFields = {}) {
+    const fact = otGuardada?.fact
+    const inst = otGuardada?.inst
+    if (!fact) return
+    const vars = {
+      numero_ot:          String(fact.numero_ot || ''),
+      contrato:           (fact.contrato || '').replace(/^contrato\s+/i,'').trim(),
+      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      titulo:             docFields.titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
+      editado_por:        docFields.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+      detalle_fact:       docFields.detalle_fact || 'Adjunto listado OT por correo electrónico',
+      detalle_inst:       docFields.detalle_inst || 'Adjunto listado OT por correo electrónico',
+      firma_coordinador:  docFields.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
+      firma_area_usuaria: docFields.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
+      firma_supervisor:   docFields.firma_supervisor || 'SUPERVISOR "Consorcio San Pedro - ITEM 4"',
+      fi_fact:      fmtTabla(fact.fecha_inicio),
+      ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
+      fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
+      plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
+      cant_fact:    String(fact.cantidad_programada || ''),
+      fi_inst:      fmtTabla(inst?.fecha_inicio),
+      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos),
+      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes),
+      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
+      cant_inst:    String(inst?.cantidad_programada || ''),
+    }
+    const template = 'template_instalaciones.docx'
+    setGenerandoDoc(true)
+    try {
+      const res = await fetch('/api/genword-inst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template, vars, pdf })
+      })
+      if (!res.ok) { alert('Error: ' + await res.text()); return }
+      const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.${pdf ? 'pdf' : 'docx'}`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    } catch(e) { alert('Error: ' + e.message) }
+    finally { setGenerandoDoc(false) }
+  }
+
+  // ── Vista post-guardado ──────────────────────────────────────
+  const contNombre = contratistas.find(c => c.id === parseInt(form.contratista_id))?.nombre || ''
+  const firmaSupDefault = contNombre.toLowerCase().includes('san pedro')
+    ? 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+    : contNombre ? `SUPERVISOR "${contNombre}"` : 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
+
+  const [docFields, setDocFields] = useState({
+    titulo:            'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
+    editado_por:       'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
+    detalle_fact:      'Adjunto listado OT por correo electrónico',
+    detalle_inst:      'Adjunto listado OT por correo electrónico',
+    firma_coordinador: 'COORDINADOR "CONSORCIO SUPERVISOR"',
+    firma_area_usuaria:'ÁREA USUARIA - ELECTROPUNO S.A.A.',
+    firma_supervisor:  firmaSupDefault,
+  })
+  const setDoc = (k, v) => setDocFields(p => ({ ...p, [k]: v }))
+
+  if (guardado && otGuardada) {
+    const fact = otGuardada.fact
+
+    const postContent = (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
+        <div className="relative rounded-2xl border border-gray-700 p-6 w-full max-w-xl overflow-y-auto" style={{ background: '#0f1a2e', maxHeight: '90vh' }}>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-green-400 text-lg">✓</span>
+                <h2 className="text-base font-bold text-white">OT-{String(fact?.numero_ot).padStart(2,'0')} creada</h2>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">¿Deseas generar el documento ahora?</p>
+            </div>
+            <button onClick={onClose} className="text-gray-500 hover:text-white text-lg">✕</button>
+          </div>
+
+          {/* Sección colapsable */}
+          <div className="rounded-xl border border-gray-700 overflow-hidden mb-4">
+            <button className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-gray-300 hover:bg-gray-800 transition-all"
+              style={{ background: '#0a1628' }} onClick={() => setDocOpen(v => !v)}>
+              <span>📄 Campos del documento</span>
+              <span className="text-gray-500">{docOpen ? '▴' : '▾'}</span>
+            </button>
+            {docOpen && (
+              <div className="p-4 space-y-3" style={{ background: '#080f1e' }}>
+                {/* Título */}
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Título del documento</label>
+                  <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={docFields.titulo} onChange={e => setDoc('titulo', e.target.value)} />
+                </div>
+                {/* Editado por */}
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Editado por</label>
+                  <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={docFields.editado_por} onChange={e => setDoc('editado_por', e.target.value)} />
+                </div>
+                {/* Detalle Factibilidades */}
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Detalle — Factibilidades</label>
+                  <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={docFields.detalle_fact} onChange={e => setDoc('detalle_fact', e.target.value)} />
+                </div>
+                {/* Detalle Instalaciones */}
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Detalle — Instalaciones Nuevas</label>
+                  <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={docFields.detalle_inst} onChange={e => setDoc('detalle_inst', e.target.value)} />
+                </div>
+                {/* Firmas */}
+                <div className="pt-2 border-t border-gray-800">
+                  <label className="text-xs text-gray-500 block mb-2">Área de firmas</label>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'firma_coordinador', label: 'Coordinador' },
+                      { key: 'firma_area_usuaria', label: 'Área Usuaria' },
+                      { key: 'firma_supervisor',   label: 'Supervisor' },
+                    ].map(({ key, label }) => (
+                      <div key={key}>
+                        <label className="text-xs text-gray-500 block mb-1">{label}</label>
+                        <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-200 text-xs outline-none focus:border-cyan-500"
+                          value={docFields[key]} onChange={e => setDoc(key, e.target.value)} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Botones */}
+          <div className="flex gap-2">
+            <button onClick={() => generarDoc(false, docFields)} disabled={generandoDoc}
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-700 text-gray-200 text-xs hover:bg-gray-800 transition-all disabled:opacity-50">
+              {generandoDoc ? '⏳...' : '📄 Descargar Word'}
+            </button>
+            <button onClick={() => generarDoc(true, docFields)} disabled={generandoDoc}
+              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+              style={{ background: '#06b6d4', color: '#000' }}>
+              {generandoDoc ? '⏳...' : '📋 Descargar PDF'}
+            </button>
+          </div>
+          <div className="flex justify-end mt-3">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">Cerrar</button>
+          </div>
+        </div>
+      </div>
+    )
+    if (typeof window === 'undefined') return null
+    return createPortal(postContent, document.body)
+  }
 
   const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
@@ -224,15 +392,21 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
               onChange={e => set('contrato', e.target.value)}
             />
           </div>
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">Fecha entrega OT <span className="text-cyan-400">*</span></label>
-            <input
-              type="date"
-              className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
-              value={form.fecha_entrega}
-              onChange={e => set('fecha_entrega', e.target.value)}
-            />
-          </div>
+        </div>
+
+        {/* Fecha entrega OT — campo protagonista */}
+        <div className="rounded-xl p-4 mb-4" style={{ background: '#0a1628', border: '1.5px solid #0e7490' }}>
+          <label className="text-xs font-bold block mb-2" style={{ color: '#06b6d4' }}>
+            📅 Fecha entrega OT <span className="text-cyan-400">*</span>
+            <span className="text-gray-500 font-normal ml-2">— las fechas de inicio y fin se calculan automáticamente</span>
+          </label>
+          <input
+            type="date"
+            className="w-full px-4 py-3 rounded-lg border text-white text-sm font-semibold outline-none"
+            style={{ borderColor: '#06b6d4', background: '#080f1e', fontSize: '15px' }}
+            value={form.fecha_entrega}
+            onChange={e => set('fecha_entrega', e.target.value)}
+          />
         </div>
 
         {/* Factibilidades */}
@@ -241,44 +415,40 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
             <span className="text-xs font-bold" style={{ color: '#06b6d4' }}>Factibilidades</span>
             <span className="text-xs text-gray-500">· Ítem 1</span>
           </div>
-          <div className="p-4 grid grid-cols-3 gap-3" style={{ background: '#0a1220' }}>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
-              <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+          <div className="p-4" style={{ background: '#0a1220' }}>
+            {/* Cantidad — protagonista */}
+            <div className="mb-3 p-3 rounded-lg" style={{ background: '#0f1a2e', border: '1px solid #0e7490' }}>
+              <label className="text-xs font-semibold block mb-1" style={{ color: '#06b6d4' }}>Cantidad programada</label>
+              <input type="text" inputMode="numeric"
+                className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-lg font-bold outline-none focus:border-cyan-500 text-center"
                 placeholder="0" value={form.cant_fact} onChange={e => set('cant_fact', e.target.value)} />
             </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. inicio (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#5c7a9e', background: '#0f1a2e' }}>{fmtD(fechas.fact?.inicio)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. final (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#5c7a9e', background: '#0f1a2e' }}>{fmtD(fechas.fact?.fin)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. límite (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#06b6d4', background: '#0f1a2e' }}>{fmtD(fechas.fact?.limite)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Plazo</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#06b6d4', background: '#0f1a2e' }}>
-                {fechas.fact?.plazo ? `${fechas.fact.plazo} días háb.` : '—'}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. reporte</label>
-              <input type="date" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
-                value={form.fecha_reporte_fact} onChange={e => set('fecha_reporte_fact', e.target.value)} />
-            </div>
-            {form.fecha_reporte_fact && (
+            {/* Fechas calculadas — editables */}
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-xs text-gray-400 block mb-1">Cant. entregada</label>
-                <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
-                  placeholder="0" value={form.cant_ent_fact} onChange={e => set('cant_ent_fact', e.target.value)} />
+                <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                  style={{ color: '#5c7a9e' }}
+                  value={fechas.fact?.inicio || form.fi_fact_manual || ''}
+                  onChange={e => set('fi_fact_manual', e.target.value)} />
               </div>
-            )}
-            <div className="col-span-3">
-              <label className="text-xs text-gray-400 block mb-1">Observaciones</label>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">F. final</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                  style={{ color: '#5c7a9e' }}
+                  value={fechas.fact?.fin || form.ff_fact_manual || ''}
+                  onChange={e => set('ff_fact_manual', e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">F. límite</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                  style={{ color: '#06b6d4' }}
+                  value={fechas.fact?.limite || form.fl_fact_manual || ''}
+                  onChange={e => set('fl_fact_manual', e.target.value)} />
+              </div>
+            </div>
+            <div className="mt-2">
+              <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
               <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
                 placeholder="Opcional..." value={form.obs_fact} onChange={e => set('obs_fact', e.target.value)} />
             </div>
@@ -291,44 +461,40 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
             <span className="text-xs font-bold" style={{ color: '#c084fc' }}>Instalaciones Nuevas</span>
             <span className="text-xs text-gray-500">· Ítem 2 (opcional)</span>
           </div>
-          <div className="p-4 grid grid-cols-3 gap-3" style={{ background: '#0a1220' }}>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
-              <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
+          <div className="p-4" style={{ background: '#0a1220' }}>
+            {/* Cantidad — protagonista */}
+            <div className="mb-3 p-3 rounded-lg" style={{ background: '#0f1a2e', border: '1px solid #7c3aed' }}>
+              <label className="text-xs font-semibold block mb-1" style={{ color: '#c084fc' }}>Cantidad programada</label>
+              <input type="text" inputMode="numeric"
+                className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-lg font-bold outline-none focus:border-purple-500 text-center"
                 placeholder="0 (dejar vacío si no aplica)" value={form.cant_inst} onChange={e => set('cant_inst', e.target.value)} />
             </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. inicio (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#5c7a9e', background: '#0f1a2e' }}>{fmtD(fechas.inst?.inicio)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. final (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#5c7a9e', background: '#0f1a2e' }}>{fmtD(fechas.inst?.fin)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. límite (auto)</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#c084fc', background: '#0f1a2e' }}>{fmtD(fechas.inst?.limite)}</div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Plazo</label>
-              <div className="px-3 py-2 rounded-lg border border-gray-800 text-xs" style={{ color: '#c084fc', background: '#0f1a2e' }}>
-                {fechas.inst?.plazo ? `${fechas.inst.plazo} días háb.` : '—'}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">F. reporte</label>
-              <input type="date" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
-                value={form.fecha_reporte_inst} onChange={e => set('fecha_reporte_inst', e.target.value)} />
-            </div>
-            {form.fecha_reporte_inst && (
+            {/* Fechas calculadas — editables */}
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-xs text-gray-400 block mb-1">Cant. entregada</label>
-                <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-purple-500"
-                  placeholder="0" value={form.cant_ent_inst} onChange={e => set('cant_ent_inst', e.target.value)} />
+                <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                  style={{ color: '#5c7a9e' }}
+                  value={fechas.inst?.inicio || form.fi_inst_manual || ''}
+                  onChange={e => set('fi_inst_manual', e.target.value)} />
               </div>
-            )}
-            <div className="col-span-3">
-              <label className="text-xs text-gray-400 block mb-1">Observaciones</label>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">F. final</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                  style={{ color: '#5c7a9e' }}
+                  value={fechas.inst?.fin || form.ff_inst_manual || ''}
+                  onChange={e => set('ff_inst_manual', e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">F. límite</label>
+                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                  style={{ color: '#c084fc' }}
+                  value={fechas.inst?.limite || form.fl_inst_manual || ''}
+                  onChange={e => set('fl_inst_manual', e.target.value)} />
+              </div>
+            </div>
+            <div className="mt-2">
+              <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
               <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-purple-500"
                 placeholder="Opcional..." value={form.obs_inst} onChange={e => set('obs_inst', e.target.value)} />
             </div>
