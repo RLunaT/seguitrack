@@ -357,148 +357,143 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           <button onClick={onClose} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
         </div>
 
-        {/* Campos base */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        {/* Campos base — una sola fila */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
           <div>
             <label className="text-xs text-gray-400 block mb-1">N° OT <span className="text-cyan-400">*</span></label>
-            <input
-              className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
-              placeholder="Ej: 152"
-              value={form.numero_ot}
-              onChange={e => set('numero_ot', e.target.value)}
-            />
+            <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+              placeholder="Ej: 152" value={form.numero_ot} onChange={e => set('numero_ot', e.target.value)} />
           </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">Contratista <span className="text-cyan-400">*</span></label>
-            <select
-              className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+            <select className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
               value={form.contratista_id}
-              onChange={e => {
-                const cont = contratistas.find(c => String(c.id) === e.target.value)
-                set('contratista_id', e.target.value)
-                if (cont?.contrato) set('contrato', cont.contrato)
-              }}
-            >
+              onChange={e => { const cont = contratistas.find(c => String(c.id) === e.target.value); set('contratista_id', e.target.value); if (cont?.contrato) set('contrato', cont.contrato) }}>
               <option value="">— Seleccionar —</option>
               {contratistas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">N° Contrato</label>
-            <input
-              className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
-              placeholder="Ej: 48-2025-ELPU/GG"
-              value={form.contrato}
-              onChange={e => set('contrato', e.target.value)}
-            />
+            <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
+              placeholder="Ej: 48-2025-ELPU/GG" value={form.contrato} onChange={e => set('contrato', e.target.value)} />
           </div>
         </div>
 
-        {/* Fecha entrega OT — campo protagonista */}
+        {/* Fecha entrega OT — protagonista */}
         <div className="rounded-xl p-4 mb-4" style={{ background: '#0a1628', border: '1.5px solid #0e7490' }}>
           <label className="text-xs font-bold block mb-2" style={{ color: '#06b6d4' }}>
             📅 Fecha entrega OT <span className="text-cyan-400">*</span>
-            <span className="text-gray-500 font-normal ml-2">— las fechas de inicio y fin se calculan automáticamente</span>
+            <span className="text-gray-500 font-normal ml-2">— las fechas se calculan automáticamente y son editables</span>
           </label>
-          <input
-            type="date"
-            className="w-full px-4 py-3 rounded-lg border text-white text-sm font-semibold outline-none"
+          <input type="date" className="w-full px-4 py-3 rounded-lg border text-white font-semibold outline-none"
             style={{ borderColor: '#06b6d4', background: '#080f1e', fontSize: '15px' }}
-            value={form.fecha_entrega}
-            onChange={e => set('fecha_entrega', e.target.value)}
-          />
+            value={form.fecha_entrega} onChange={e => set('fecha_entrega', e.target.value)} />
         </div>
 
-        {/* Factibilidades */}
-        <div className="rounded-xl border mb-3 overflow-hidden" style={{ borderColor: '#0e7490' }}>
-          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: '#083344' }}>
-            <span className="text-xs font-bold" style={{ color: '#06b6d4' }}>Factibilidades</span>
-            <span className="text-xs text-gray-500">· Ítem 1</span>
-          </div>
-          <div className="p-4" style={{ background: '#0a1220' }}>
-            {/* Cantidad — protagonista */}
-            <div className="mb-3 p-3 rounded-lg" style={{ background: '#0f1a2e', border: '1px solid #0e7490' }}>
-              <label className="text-xs font-semibold block mb-1" style={{ color: '#06b6d4' }}>Cantidad programada</label>
-              <input type="text" inputMode="numeric"
-                className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-lg font-bold outline-none focus:border-cyan-500 text-center"
-                placeholder="0" value={form.cant_fact} onChange={e => set('cant_fact', e.target.value)} />
-            </div>
-            {/* Fechas calculadas — editables */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                  style={{ color: '#5c7a9e' }}
-                  value={fechas.fact?.inicio || form.fi_fact_manual || ''}
-                  onChange={e => set('fi_fact_manual', e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">F. final</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                  style={{ color: '#5c7a9e' }}
-                  value={fechas.fact?.fin || form.ff_fact_manual || ''}
-                  onChange={e => set('ff_fact_manual', e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">F. límite</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                  style={{ color: '#06b6d4' }}
-                  value={fechas.fact?.limite || form.fl_fact_manual || ''}
-                  onChange={e => set('fl_fact_manual', e.target.value)} />
-              </div>
-            </div>
-            <div className="mt-2">
-              <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
-              <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
-                placeholder="Opcional..." value={form.obs_fact} onChange={e => set('obs_fact', e.target.value)} />
-            </div>
-          </div>
-        </div>
+        {/* Factibilidades + Instalaciones Nuevas — horizontales */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
 
-        {/* Instalaciones Nuevas */}
-        <div className="rounded-xl border mb-4 overflow-hidden" style={{ borderColor: '#7c3aed' }}>
-          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: '#1a0f33' }}>
-            <span className="text-xs font-bold" style={{ color: '#c084fc' }}>Instalaciones Nuevas</span>
-            <span className="text-xs text-gray-500">· Ítem 2 (opcional)</span>
+          {/* Factibilidades */}
+          <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#0e7490' }}>
+            <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#083344', borderBottom: '0.5px solid #0e7490' }}>
+              <span className="text-xs font-bold" style={{ color: '#06b6d4' }}>Factibilidades</span>
+              <span className="text-xs text-gray-500">· Ítem 1</span>
+            </div>
+            <div className="p-3" style={{ background: '#0a1220' }}>
+              <div className="mb-3">
+                <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
+                <input type="text" inputMode="numeric"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-base font-bold outline-none focus:border-cyan-500 text-center"
+                  placeholder="0" value={form.cant_fact} onChange={e => set('cant_fact', e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                    style={{ color: '#5c7a9e' }}
+                    value={form.fi_fact_manual || fechas.fact?.inicio || ''}
+                    onChange={e => set('fi_fact_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. final</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                    style={{ color: '#5c7a9e' }}
+                    value={form.ff_fact_manual || fechas.fact?.fin || ''}
+                    onChange={e => set('ff_fact_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. límite</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
+                    style={{ color: '#06b6d4' }}
+                    value={form.fl_fact_manual || fechas.fact?.limite || ''}
+                    onChange={e => set('fl_fact_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Plazo</label>
+                  <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#06b6d4', background: '#0f1a2e' }}>
+                    {fechas.fact?.plazo ? `${fechas.fact.plazo} días háb.` : '—'}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
+                <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
+                  placeholder="Opcional..." value={form.obs_fact} onChange={e => set('obs_fact', e.target.value)} />
+              </div>
+            </div>
           </div>
-          <div className="p-4" style={{ background: '#0a1220' }}>
-            {/* Cantidad — protagonista */}
-            <div className="mb-3 p-3 rounded-lg" style={{ background: '#0f1a2e', border: '1px solid #7c3aed' }}>
-              <label className="text-xs font-semibold block mb-1" style={{ color: '#c084fc' }}>Cantidad programada</label>
-              <input type="text" inputMode="numeric"
-                className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-lg font-bold outline-none focus:border-purple-500 text-center"
-                placeholder="0 (dejar vacío si no aplica)" value={form.cant_inst} onChange={e => set('cant_inst', e.target.value)} />
+
+          {/* Instalaciones Nuevas */}
+          <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#7c3aed' }}>
+            <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#1a0f33', borderBottom: '0.5px solid #7c3aed' }}>
+              <span className="text-xs font-bold" style={{ color: '#c084fc' }}>Inst. Nuevas</span>
+              <span className="text-xs text-gray-500">· Ítem 2 (opcional)</span>
             </div>
-            {/* Fechas calculadas — editables */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                  style={{ color: '#5c7a9e' }}
-                  value={fechas.inst?.inicio || form.fi_inst_manual || ''}
-                  onChange={e => set('fi_inst_manual', e.target.value)} />
+            <div className="p-3" style={{ background: '#0a1220' }}>
+              <div className="mb-3">
+                <label className="text-xs text-gray-400 block mb-1">Cantidad programada</label>
+                <input type="text" inputMode="numeric"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-base font-bold outline-none focus:border-purple-500 text-center"
+                  placeholder="0" value={form.cant_inst} onChange={e => set('cant_inst', e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                    style={{ color: '#5c7a9e' }}
+                    value={form.fi_inst_manual || fechas.inst?.inicio || ''}
+                    onChange={e => set('fi_inst_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. final</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                    style={{ color: '#5c7a9e' }}
+                    value={form.ff_inst_manual || fechas.inst?.fin || ''}
+                    onChange={e => set('ff_inst_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">F. límite</label>
+                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
+                    style={{ color: '#c084fc' }}
+                    value={form.fl_inst_manual || fechas.inst?.limite || ''}
+                    onChange={e => set('fl_inst_manual', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Plazo</label>
+                  <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#c084fc', background: '#0f1a2e' }}>
+                    {fechas.inst?.plazo ? `${fechas.inst.plazo} días háb.` : '—'}
+                  </div>
+                </div>
               </div>
               <div>
-                <label className="text-xs text-gray-500 block mb-1">F. final</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                  style={{ color: '#5c7a9e' }}
-                  value={fechas.inst?.fin || form.ff_inst_manual || ''}
-                  onChange={e => set('ff_inst_manual', e.target.value)} />
+                <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
+                <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-purple-500"
+                  placeholder="Opcional..." value={form.obs_inst} onChange={e => set('obs_inst', e.target.value)} />
               </div>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">F. límite</label>
-                <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                  style={{ color: '#c084fc' }}
-                  value={fechas.inst?.limite || form.fl_inst_manual || ''}
-                  onChange={e => set('fl_inst_manual', e.target.value)} />
-              </div>
-            </div>
-            <div className="mt-2">
-              <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
-              <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-gray-300 text-xs outline-none focus:border-purple-500"
-                placeholder="Opcional..." value={form.obs_inst} onChange={e => set('obs_inst', e.target.value)} />
             </div>
           </div>
+
         </div>
 
         {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
