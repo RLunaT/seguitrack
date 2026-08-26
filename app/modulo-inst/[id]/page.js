@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
@@ -67,6 +68,13 @@ export default function ModuloPage() {
   const anioSelec = searchParams.get('anio') || String(new Date().getFullYear())
   const periodoUrl = anioSelec // para compatibilidad con el resto del código
   const [tab, setTab] = useState('tabla')
+  const [feriados, setFeriados] = useState([])
+  const [capacidades, setCapacidades] = useState({ fact: 20, inst: 25 })
+  const [capTab, setCapTab] = useState(null) // 'fact' | 'inst'
+  const [capValor, setCapValor] = useState('')
+  const [feriadoNuevo, setFeriadoNuevo] = useState({ fecha: '', tipo: 'nacional', descripcion: '' })
+  const [savingCap, setSavingCap] = useState(false)
+  const [savingFer, setSavingFer] = useState(false)
   const [modulo, setModulo] = useState(null)
   const [ots, setOts] = useState([])
   const [contratistas, setContratistas] = useState([])
@@ -77,6 +85,11 @@ export default function ModuloPage() {
   const [editando, setEditando] = useState(null)
   const [modalSeg, setModalSeg]   = useState(false)
   const [otSeg, setOtSeg]         = useState(null)
+  const [modalSegInst, setModalSegInst] = useState(false)
+  const [segActSelec, setSegActSelec]   = useState(null) // 'fact' | 'inst'
+  const [segFecha, setSegFecha]         = useState('')
+  const [segCant, setSegCant]           = useState('')
+  const [savingSeg, setSavingSeg]       = useState(false)
   const [buscar, setBuscar] = useState('')
   const [filtContratista, setFiltContratista] = useState('')
   const [filtEstado, setFiltEstado] = useState('')
@@ -100,6 +113,11 @@ export default function ModuloPage() {
     try { return JSON.parse(localStorage.getItem(`cols_${id}`) || '{}') } catch { return {} }
   })
   const [sortCfg, setSortCfg] = useState({ key: 'numero_ot', dir: 'asc' })
+  const [docToast, setDocToast] = useState(null) // { msg, tipo }
+  function mostrarToast(msg, tipo = 'info', duracion = 0) {
+    setDocToast({ msg, tipo })
+    if (duracion > 0) setTimeout(() => setDocToast(null), duracion)
+  }
   const [camposTabOrder, setCamposTabOrder] = useState(null)
   const [columnFilters, setColumnFilters] = useState({})
 
@@ -111,15 +129,23 @@ export default function ModuloPage() {
   }
 
   const cargar = useCallback(async () => {
-    const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }] = await Promise.all([
+    const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }, { data: ferData }, { data: capData }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
       supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).order('numero_ot'),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
+      supabase.from('feriados').select('*').order('fecha'),
+      supabase.from('config_global').select('clave,valor').in('clave',['inst_capacidad_fact','inst_capacidad_inst']),
     ])
     const p = anioSelec
     setPeriodo(p)
     setModulo(mod)
+    setFeriados(ferData || [])
+    if (capData) {
+      const cf = capData.find(c => c.clave === 'inst_capacidad_fact')
+      const ci = capData.find(c => c.clave === 'inst_capacidad_inst')
+      setCapacidades({ fact: parseInt(cf?.valor)||20, inst: parseInt(ci?.valor)||25 })
+    }
 
     // ── Contratistas vigentes para este módulo/período ──────────────────
     // No depende de que exista una fila en contratista_modulos para ESTE
@@ -490,12 +516,13 @@ export default function ModuloPage() {
     const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
 
     try {
+      mostrarToast('word-gen', 'info')
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ template, vars })
       })
-      if (!res.ok) { alert('Error al generar Word: ' + await res.text()); return }
+      if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar Word: ' + await res.text()); return }
       const blob = await res.blob()
       const disposition = res.headers.get('Content-Disposition') || ''
       const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
@@ -506,7 +533,8 @@ export default function ModuloPage() {
       a.href = url; a.download = filename
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      mostrarToast('word-ok', 'ok')
+    } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
   }
 
   // Genera y descarga el PDF directamente sin mostrar modal — mismo dato
@@ -521,7 +549,12 @@ export default function ModuloPage() {
     const DIAS  = ['do','lu','ma','mi','ju','vi','sá']
     function fmtEntrega(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return String(dt.getDate()).padStart(2,'0')+'-'+MESES[dt.getMonth()]+'-'+dt.getFullYear() }
     function fmtTabla(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}` }
-    function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); let dias=0,cur=new Date(d1); while(cur<=d2){if(cur.getDay()!==0&&cur.getDay()!==6)dias++;cur.setDate(cur.getDate()+1)} return `${dias} días` }
+    function diasHab(ini, fin) {
+      // Plazo = (fin - inicio) + 1 días calendario — igual que Excel F11=(D11-C11)+1
+      if (!ini || !fin) return ''
+      const d1 = new Date(ini + 'T00:00:00'), d2 = new Date(fin + 'T00:00:00')
+      return `${Math.round((d2-d1)/86400000)+1} días`
+    }
 
     const contPdf = contratistas.find(c => c.id === ot.contratista_id)
     const contNombrePdf = contPdf?.nombre || ''
@@ -548,19 +581,21 @@ export default function ModuloPage() {
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
     const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
     try {
+      mostrarToast('pdf-gen', 'info')
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ template, vars, pdf: true })
       })
-      if (!res.ok) { alert('Error al generar PDF: ' + await res.text()); return }
+      if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar PDF: ' + await res.text()); return }
       const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      mostrarToast('pdf-ok', 'ok')
+    } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
   }
 
   function abrirModalDoc(ot) {
@@ -821,6 +856,7 @@ export default function ModuloPage() {
           { key: 'tabla', label: '📋 Listado' },
           { key: 'gantt', label: '📅 Gantt' },
           { key: 'campos', label: '⚙️ Campos' },
+          { key: 'feriados', label: '🗓 Feriados y capacidad' },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-all ${tab === t.key ? 'border-blue-500 text-blue-400 bg-blue-950' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
@@ -986,7 +1022,7 @@ export default function ModuloPage() {
                                 if (k === 'inst_editar') return null
                                 if (k === 'acciones') {
                                   if (!esFirst) return null
-                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:115,minWidth:115}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact)} onPdf={()=>generarPdfDirecto(fact)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg(fact);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(fact);setModalOpen(true)}}>✏️</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
+                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:90,minWidth:90}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact)} onPdf={()=>generarPdfDirecto(fact)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg({fact, inst}); setModalSegInst(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esInst = ot.actividad === 'instalaciones'
@@ -1029,6 +1065,136 @@ export default function ModuloPage() {
         )}
 
         {tab === 'gantt' && <GanttModulo ots={otsFiltradas} contratistas={contratistas} modulo={modulo} />}
+
+        {/* ── FERIADOS Y CAPACIDAD ── */}
+        {tab === 'feriados' && (
+          <div className="max-w-3xl space-y-6">
+
+            {/* Capacidad diaria de trabajo */}
+            <div className="card">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-sm font-semibold text-white">⚡ Capacidad diaria de trabajo</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">Define cuántas unidades puede procesar el equipo por día hábil en cada actividad. Este valor se usa para calcular automáticamente las fechas de fin de trabajo.</p>
+
+              {/* Selector de actividad */}
+              <div className="flex gap-2 mb-4">
+                {[
+                  { key: 'fact', label: 'Factibilidades', color: '#06b6d4', bg: '#083344', border: '#0e7490' },
+                  { key: 'inst', label: 'Instalaciones Nuevas', color: '#c084fc', bg: '#1a0f33', border: '#7c3aed' },
+                ].map(a => (
+                  <button key={a.key} onClick={() => { setCapTab(a.key); setCapValor(String(capacidades[a.key])) }}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold border transition-all"
+                    style={capTab === a.key
+                      ? { background: a.bg, color: a.color, borderColor: a.border }
+                      : { background: 'transparent', color: '#5c7a9e', borderColor: '#1e293b' }}>
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+
+              {capTab && (
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-gray-400 block mb-1">
+                      Capacidad diaria — {capTab === 'fact' ? 'Factibilidades' : 'Instalaciones Nuevas'}
+                    </label>
+                    <input type="text" inputMode="numeric"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-sm font-bold outline-none focus:border-cyan-500"
+                      value={capValor} onChange={e => setCapValor(e.target.value)} />
+                    <p className="text-xs text-gray-600 mt-1">Actualmente: {capacidades[capTab]} unidades/día</p>
+                  </div>
+                  <button disabled={savingCap} onClick={async () => {
+                    setSavingCap(true)
+                    const clave = capTab === 'fact' ? 'inst_capacidad_fact' : 'inst_capacidad_inst'
+                    await supabase.from('config_global').upsert({ clave, valor: capValor, descripcion: `Capacidad diaria ${capTab === 'fact' ? 'Factibilidades' : 'Instalaciones Nuevas'}` })
+                    setCapacidades(p => ({ ...p, [capTab]: parseInt(capValor)||p[capTab] }))
+                    setSavingCap(false)
+                    setCapTab(null)
+                  }} className="px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    style={{ background: '#06b6d4', color: '#000' }}>
+                    {savingCap ? 'Guardando...' : 'Guardar'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Feriados nacionales y locales */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-white">📅 Feriados nacionales y locales</span>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">Establece los feriados nacionales y locales que se excluirán del cálculo de fechas. Los feriados locales también consideran días especiales de la región Puno.</p>
+
+              {/* Agregar feriado */}
+              <div className="flex gap-2 mb-4 items-end">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Fecha</label>
+                  <input type="date" className="px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={feriadoNuevo.fecha} onChange={e => setFeriadoNuevo(p => ({ ...p, fecha: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Tipo</label>
+                  <select className="px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none"
+                    value={feriadoNuevo.tipo} onChange={e => setFeriadoNuevo(p => ({ ...p, tipo: e.target.value }))}>
+                    <option value="nacional">Nacional</option>
+                    <option value="local">Local (Puno)</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-gray-400 block mb-1">Descripción</label>
+                  <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    placeholder="Ej: Navidad" value={feriadoNuevo.descripcion}
+                    onChange={e => setFeriadoNuevo(p => ({ ...p, descripcion: e.target.value }))} />
+                </div>
+                <button disabled={savingFer || !feriadoNuevo.fecha} onClick={async () => {
+                  setSavingFer(true)
+                  const { data } = await supabase.from('feriados').insert({ fecha: feriadoNuevo.fecha, tipo: feriadoNuevo.tipo, descripcion: feriadoNuevo.descripcion }).select().single()
+                  if (data) setFeriados(p => [...p, data].sort((a,b) => a.fecha.localeCompare(b.fecha)))
+                  setFeriadoNuevo({ fecha: '', tipo: 'nacional', descripcion: '' })
+                  setSavingFer(false)
+                }} className="px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                  style={{ background: '#06b6d4', color: '#000' }}>
+                  {savingFer ? '...' : '+ Agregar'}
+                </button>
+              </div>
+
+              {/* Lista de feriados agrupados por año */}
+              {Object.entries(
+                feriados.reduce((acc, f) => {
+                  const anio = f.fecha?.slice(0,4) || '—'
+                  if (!acc[anio]) acc[anio] = []
+                  acc[anio].push(f)
+                  return acc
+                }, {})
+              ).sort(([a],[b]) => b.localeCompare(a)).map(([anio, lista]) => (
+                <div key={anio} className="mb-4">
+                  <div className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">{anio}</div>
+                  <div className="space-y-1">
+                    {lista.map(f => (
+                      <div key={f.id} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: '#0a1220' }}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono text-gray-300">{f.fecha}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${f.tipo === 'nacional' ? 'bg-blue-950 text-blue-400' : 'bg-purple-950 text-purple-400'}`}>
+                            {f.tipo === 'nacional' ? 'Nacional' : 'Local'}
+                          </span>
+                          <span className="text-xs text-gray-400">{f.descripcion}</span>
+                        </div>
+                        <button onClick={async () => {
+                          await supabase.from('feriados').delete().eq('id', f.id)
+                          setFeriados(p => p.filter(x => x.id !== f.id))
+                        }} className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-red-950 transition-all">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {feriados.length === 0 && (
+                <p className="text-xs text-gray-600 text-center py-6">No hay feriados registrados.</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── CAMPOS — con preview estilo Excel ── */}
         {tab === 'campos' && (
@@ -1119,6 +1285,9 @@ export default function ModuloPage() {
       </div>
 
       {/* ── MODAL OT — Instalaciones Nuevas usa ModalInstOT ── */}
+      {/* Modal de descarga */}
+      <ModalDescarga status={docToast?.msg} onClose={() => setDocToast(null)} />
+
       {modalOpen && (
         <ModalInstOT
           modulo={modulo}
@@ -1127,10 +1296,79 @@ export default function ModuloPage() {
           anioActivo={anioSelec}
           onClose={() => { setModalOpen(false); cargar() }}
           onSaved={(esNueva) => { if (!esNueva) { setModalOpen(false) }; cargar() }}
+          capacidades={capacidades}
+          feriadosDB={feriados}
+          onDocStatus={(s) => mostrarToast(s)}
         />
       )}
 
-      {/* ── MODAL SEGUIMIENTO ── */}
+      {/* ── MODAL SEGUIMIENTO INST ── */}
+      {modalSegInst && otSeg && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="rounded-2xl border border-gray-700 p-6 w-full max-w-sm" style={{ background: '#0f1a2e' }}>
+            {!segActSelec ? (
+              <>
+                <h3 className="text-sm font-bold text-white mb-1">📊 Seguimiento</h3>
+                <p className="text-xs text-gray-500 mb-4">OT-{String(otSeg.fact?.numero_ot).padStart(2,'0')} · ¿Qué actividad deseas reportar?</p>
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => { setSegActSelec('fact'); setSegFecha(otSeg.fact?.fecha_reporte||''); setSegCant(String(otSeg.fact?.cantidad_entregada||'')) }}
+                    className="w-full py-3 rounded-xl border text-xs font-semibold text-left px-4 transition-all hover:brightness-110"
+                    style={{ background: '#083344', borderColor: '#0e7490', color: '#06b6d4' }}>
+                    Factibilidades
+                    {otSeg.fact?.fecha_reporte && <span className="ml-2 text-gray-500 font-normal">· {otSeg.fact.fecha_reporte}</span>}
+                  </button>
+                  {otSeg.inst && (
+                    <button onClick={() => { setSegActSelec('inst'); setSegFecha(otSeg.inst?.fecha_reporte||''); setSegCant(String(otSeg.inst?.cantidad_entregada||'')) }}
+                      className="w-full py-3 rounded-xl border text-xs font-semibold text-left px-4 transition-all hover:brightness-110"
+                      style={{ background: '#1a0f33', borderColor: '#7c3aed', color: '#c084fc' }}>
+                      Instalaciones Nuevas
+                      {otSeg.inst?.fecha_reporte && <span className="ml-2 text-gray-500 font-normal">· {otSeg.inst.fecha_reporte}</span>}
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => { setModalSegInst(false); setOtSeg(null); setSegActSelec(null) }}
+                  className="w-full mt-4 py-2 rounded-lg border border-gray-700 text-gray-400 text-xs hover:bg-gray-800">Cancelar</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setSegActSelec(null)} className="text-xs text-gray-500 hover:text-gray-300 mb-3 flex items-center gap-1">← Volver</button>
+                <h3 className="text-sm font-bold text-white mb-1">
+                  {segActSelec === 'fact' ? '📊 Seguimiento — Factibilidades' : '📊 Seguimiento — Instalaciones Nuevas'}
+                </h3>
+                <p className="text-xs text-gray-500 mb-4">OT-{String(otSeg.fact?.numero_ot).padStart(2,'0')}</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Fecha de reporte</label>
+                    <input type="date" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                      value={segFecha} onChange={e => setSegFecha(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Cantidad entregada</label>
+                    <input type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                      placeholder="0" value={segCant} onChange={e => setSegCant(e.target.value)} />
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => { setModalSegInst(false); setOtSeg(null); setSegActSelec(null) }}
+                    className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">Cancelar</button>
+                  <button disabled={savingSeg || !segFecha} onClick={async () => {
+                    setSavingSeg(true)
+                    const otId = segActSelec === 'fact' ? otSeg.fact?.id : otSeg.inst?.id
+                    await supabase.from('ots').update({ fecha_reporte: segFecha, cantidad_entregada: parseInt(segCant)||null }).eq('id', otId)
+                    setSavingSeg(false)
+                    setModalSegInst(false); setOtSeg(null); setSegActSelec(null); setSegFecha(''); setSegCant('')
+                    cargar()
+                  }} className="flex-1 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    style={{ background: '#06b6d4', color: '#000' }}>
+                    {savingSeg ? 'Guardando...' : 'Guardar'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
       {modalSeg && otSeg && (
         <ModalSeguimiento
           ot={otSeg}
@@ -1900,5 +2138,43 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
         </div>
       </div>
     </div>
+  )
+}
+// ── Modal de descarga de documento ────────────────────────────
+function ModalDescarga({ status, onClose }) {
+  if (!status) return null
+  const listo = status === 'word-ok' || status === 'pdf-ok'
+  const error = status === 'error'
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+      <div className="rounded-2xl border p-8 flex flex-col items-center gap-4 text-center"
+        style={{ background: '#0f1a2e', borderColor: error ? '#991b1b' : listo ? '#166534' : '#0e7490', minWidth: 280, maxWidth: 360 }}>
+        {/* Icono */}
+        {!listo && !error && (
+          <div style={{ width: 48, height: 48, border: '4px solid #0e7490', borderTopColor: '#06b6d4', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        )}
+        {listo && <div style={{ fontSize: 40 }}>✅</div>}
+        {error && <div style={{ fontSize: 40 }}>❌</div>}
+
+        {/* Mensaje */}
+        <div>
+          {status === 'word-gen' && <><p className="text-white font-semibold text-sm mb-1">Generando documento Word</p><p className="text-gray-400 text-xs">Por favor espera un momento...</p></>}
+          {status === 'pdf-gen'  && <><p className="text-white font-semibold text-sm mb-1">Generando PDF</p><p className="text-gray-400 text-xs">Esto puede tomar unos segundos si el servidor se reinició recientemente...</p></>}
+          {status === 'word-ok'  && <><p className="text-green-400 font-semibold text-sm mb-1">¡Listo!</p><p className="text-gray-400 text-xs">La orden de trabajo se descargó correctamente en Word.</p></>}
+          {status === 'pdf-ok'   && <><p className="text-green-400 font-semibold text-sm mb-1">¡Listo!</p><p className="text-gray-400 text-xs">El PDF se descargó correctamente.</p></>}
+          {status === 'error'    && <><p className="text-red-400 font-semibold text-sm mb-1">Error al generar</p><p className="text-gray-400 text-xs">No se pudo generar el documento. Intenta de nuevo.</p></>}
+        </div>
+
+        {/* Botón cerrar — solo cuando terminó */}
+        {(listo || error) && (
+          <button onClick={onClose} className="mt-2 px-6 py-2 rounded-lg text-xs font-semibold"
+            style={{ background: listo ? '#06b6d4' : '#ef4444', color: '#000' }}>
+            {listo ? 'Cerrar' : 'Cerrar'}
+          </button>
+        )}
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>,
+    document.body
   )
 }

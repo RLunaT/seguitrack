@@ -3,65 +3,93 @@ import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabase'
 
-// Feriados peruanos fijos (año variable)
-function getFeriados(anio) {
-  return [
-    `${anio}-01-01`, `${anio}-04-17`, `${anio}-04-18`,
-    `${anio}-05-01`, `${anio}-06-29`, `${anio}-07-28`, `${anio}-07-29`,
-    `${anio}-08-30`, `${anio}-10-08`, `${anio}-11-01`, `${anio}-12-08`, `${anio}-12-25`,
-  ]
+// Feriados exactos del Excel (columnas L y M — nacionales y locales Puno)
+// Se sobreescriben con los valores de la BD si se pasan como prop
+const FERIADOS_DEFAULT = new Set([
+  '2026-01-01','2026-04-02','2026-04-03','2026-05-01','2026-06-07',
+  '2026-06-29','2026-07-23','2026-07-28','2026-07-29','2026-08-06',
+  '2026-08-30','2026-11-01','2026-12-08','2026-12-09','2026-12-25',
+  '2025-01-01','2025-04-17','2025-04-18','2025-05-01','2025-06-29',
+  '2025-07-28','2025-07-29','2025-08-30','2025-11-01','2025-12-08','2025-12-25',
+])
+// calcularPlazo: días calendario (fin - inicio) + 1
+function calcularPlazo(ini, fin) {
+  if (!ini || !fin) return null
+  const d1 = new Date(ini + 'T00:00:00')
+  const d2 = new Date(fin + 'T00:00:00')
+  return Math.round((d2 - d1) / 86400000) + 1
 }
 
-function addDiasHabiles(fechaStr, dias) {
-  if (!fechaStr || dias === undefined) return ''
-  const dt = new Date(fechaStr + 'T00:00:00')
-  const anio = dt.getFullYear()
-  const feriados = new Set(getFeriados(anio).concat(getFeriados(anio + 1)))
-  let restante = Math.abs(dias)
-  const paso = dias >= 0 ? 1 : -1
-  while (restante > 0) {
-    dt.setDate(dt.getDate() + paso)
-    const dow = dt.getDay()
-    const iso = dt.toISOString().slice(0, 10)
-    if (dow !== 0 && dow !== 6 && !feriados.has(iso)) restante--
-  }
-  return dt.toISOString().slice(0, 10)
-}
-
-function addDias(fechaStr, dias) {
-  if (!fechaStr) return ''
-  const dt = new Date(fechaStr + 'T00:00:00')
-  dt.setDate(dt.getDate() + dias)
-  return dt.toISOString().slice(0, 10)
-}
-
-// Días hábiles según cantidad: INT(cant / divisor)
-function diasHabilesPorCant(cant, divisor) {
-  const c = parseInt(cant) || 0
-  return Math.max(1, Math.floor(c / divisor))
-}
-
-// Calcula fechas para ambas actividades a partir de la fecha de entrega y cantidades
-function calcularFechas(fechaEntrega, cantFact, cantInst) {
+// Réplica exacta de las fórmulas del Excel
+function calcularFechas(fechaEntrega, cantFact, cantInst, capFact = 20, capInst = 25, feriadosSet = FERIADOS_DEFAULT) {
   if (!fechaEntrega) return { fact: {}, inst: {} }
 
-  const inicioFact = addDias(fechaEntrega, 1)
-  const diasFact = diasHabilesPorCant(cantFact, 5)
-  const finFact = addDiasHabiles(inicioFact, diasFact)
-  const limiteFact = addDiasHabiles(finFact, 1)
+  function esFeriado(fecha) {
+    const iso = typeof fecha === 'string' ? fecha : fecha.toISOString().slice(0,10)
+    return feriadosSet.has(iso)
+  }
+  function workdayIntl11(fechaStr, n) {
+    if (!fechaStr || n <= 0) return fechaStr
+    const dt = new Date(fechaStr + 'T00:00:00')
+    let restante = n
+    while (restante > 0) {
+      dt.setDate(dt.getDate() + 1)
+      if (dt.getDay() !== 0 && !esFeriado(dt)) restante--
+    }
+    return dt.toISOString().slice(0,10)
+  }
+  function workday(fechaStr, n) {
+    if (!fechaStr) return fechaStr
+    const dt = new Date(fechaStr + 'T00:00:00')
+    let restante = Math.abs(n)
+    const paso = n >= 0 ? 1 : -1
+    while (restante > 0) {
+      dt.setDate(dt.getDate() + paso)
+      if (dt.getDay() !== 0 && dt.getDay() !== 6 && !esFeriado(dt)) restante--
+    }
+    return dt.toISOString().slice(0,10)
+  }
 
-  const inicioInst = addDias(fechaEntrega, 1)
-  const diasInst = diasHabilesPorCant(cantInst, 10)
-  const finInst = addDiasHabiles(inicioInst, diasInst)
-  const limiteInst = addDiasHabiles(finInst, 1)
+  // C11 = I7 + 1 (día calendario)
+  const dtEntrega = new Date(fechaEntrega + 'T00:00:00')
+  dtEntrega.setDate(dtEntrega.getDate() + 1)
+  const inicio = dtEntrega.toISOString().slice(0,10)
 
-  // Fecha límite compartida = la mayor de ambas
-  const limiteComun = limiteFact > limiteInst ? limiteFact : limiteInst
+  // Factibilidades
+  // D11 = WORKDAY.INTL(C11, INT(G11/20), 11, feriados)
+  const nFact = Math.floor((parseInt(cantFact) || 0) / capFact)
+  const finFact = nFact > 0 ? workdayIntl11(inicio, nFact) : inicio
+
+  // E11 = WORKDAY(D11, IF(WEEKDAY(D11,2)=6, 2, 1), feriados_locales)
+  const dtFinFact = new Date(finFact + 'T00:00:00')
+  const dowFact = dtFinFact.getDay() // 6=sáb
+  const diasLimiteFact = dowFact === 6 ? 2 : 1
+  const limiteFact = workday(finFact, diasLimiteFact)
+
+  // Instalaciones Nuevas
+  // C12 = C11, D12 = WORKDAY.INTL(C12, INT(G12/25), 11, feriados)
+  const nInst = Math.floor((parseInt(cantInst) || 0) / capInst)
+  const finInst = nInst > 0 ? workdayIntl11(inicio, nInst) : inicio
+
+  // E12 = WORKDAY(D12, IF(WEEKDAY(D12,2)=6, 2, 1), feriados_locales) — sin +3
+  const dtFinInst = new Date(finInst + 'T00:00:00')
+  const dowInst = dtFinInst.getDay()
+  const diasLimiteInst = dowInst === 6 ? 2 : 1
+  const limiteInst = workday(finInst, diasLimiteInst)
 
   return {
-    fact: { inicio: inicioFact, fin: finFact, limite: limiteFact, plazo: diasFact },
-    inst: { inicio: inicioInst, fin: finInst,  limite: limiteInst,  plazo: diasInst },
-    limiteComun,
+    fact: {
+      inicio,
+      fin:    finFact,
+      limite: limiteFact,
+      plazo:  calcularPlazo(inicio, finFact),
+    },
+    inst: {
+      inicio,
+      fin:    finInst,
+      limite: limiteInst,
+      plazo:  calcularPlazo(inicio, finInst),
+    },
   }
 }
 
@@ -80,17 +108,27 @@ const FORM_DEFAULT = {
   cant_ent_inst:  '',
 }
 
-export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved, anioActivo }) {
+// Días abreviados en español
+const DIAS_ES = ['do','lu','ma','mi','ju','vi','sá']
+function fmtFechaModal(iso) {
+  if (!iso) return '—'
+  const dt = new Date(iso + 'T00:00:00')
+  const dia = DIAS_ES[dt.getDay()]
+  return `${dia} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
+}
+
+export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved, anioActivo, capacidades, feriadosDB, onDocStatus }) {
   const esEdicion = !!par
   const [form, setForm] = useState(FORM_DEFAULT)
   const [fechas, setFechas] = useState({ fact: {}, inst: {} })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [guardado, setGuardado] = useState(false)
-  const [docOpen, setDocOpen] = useState(true)
-  const [otGuardada, setOtGuardada] = useState(null) // { fact, inst }
+  const [docOpen, setDocOpen] = useState(false)
+  const [otGuardada, setOtGuardada] = useState(null)
   const [editadoPor, setEditadoPor] = useState('ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES')
   const [generandoDoc, setGenerandoDoc] = useState(false)
+  const [docStatus, setDocStatus] = useState(null) // null | 'word-gen' | 'word-ok' | 'pdf-gen' | 'pdf-ok' | 'error'
 
   useEffect(() => {
     if (esEdicion && par?.length) {
@@ -114,8 +152,13 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   }, [par, esEdicion])
 
   useEffect(() => {
-    setFechas(calcularFechas(form.fecha_entrega, form.cant_fact, form.cant_inst))
-  }, [form.fecha_entrega, form.cant_fact, form.cant_inst])
+    const feriadosSet = feriadosDB?.length
+      ? new Set(feriadosDB.map(f => f.fecha))
+      : FERIADOS_DEFAULT
+    const capFact = capacidades?.fact || 20
+    const capInst = capacidades?.inst || 25
+    setFechas(calcularFechas(form.fecha_entrega, form.cant_fact, form.cant_inst, capFact, capInst, feriadosSet))
+  }, [form.fecha_entrega, form.cant_fact, form.cant_inst, capacidades, feriadosDB])
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
@@ -185,7 +228,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   const DIAS  = ['do','lu','ma','mi','ju','vi','sá']
   function fmtEntrega(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${String(dt.getDate()).padStart(2,'0')}-${MESES[dt.getMonth()]}-${dt.getFullYear()}` }
   function fmtTabla(d) { if (!d) return ''; const dt = new Date(d+'T00:00:00'); return `${DIAS[dt.getDay()]} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}` }
-  function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); let dias=0,cur=new Date(d1); while(cur<=d2){if(cur.getDay()!==0&&cur.getDay()!==6)dias++;cur.setDate(cur.getDate()+1)} return `${dias} días` }
+  function diasHab(ini, fin) { if (!ini||!fin) return ''; const d1=new Date(ini+'T00:00:00'),d2=new Date(fin+'T00:00:00'); return `${Math.round((d2-d1)/86400000)+1} días` }
 
   async function generarDoc(pdf = false, docFields = {}) {
     const fact = otGuardada?.fact
@@ -215,20 +258,25 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
     }
     const template = 'template_instalaciones.docx'
     setGenerandoDoc(true)
+    setDocStatus(pdf ? 'pdf-gen' : 'word-gen')
+    onDocStatus?.(pdf ? 'pdf-gen' : 'word-gen')
     try {
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ template, vars, pdf })
       })
-      if (!res.ok) { alert('Error: ' + await res.text()); return }
+      if (!res.ok) { setDocStatus('error'); onDocStatus?.('error'); alert('Error: ' + await res.text()); return }
       const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.${pdf ? 'pdf' : 'docx'}`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      const okStatus = pdf ? 'pdf-ok' : 'word-ok'
+      setDocStatus(okStatus)
+      onDocStatus?.(okStatus)
+    } catch(e) { setDocStatus('error'); onDocStatus?.('error'); alert('Error: ' + e.message) }
     finally { setGenerandoDoc(false) }
   }
 
@@ -270,7 +318,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           <div className="rounded-xl border border-gray-700 overflow-hidden mb-4">
             <button className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-gray-300 hover:bg-gray-800 transition-all"
               style={{ background: '#0a1628' }} onClick={() => setDocOpen(v => !v)}>
-              <span>📄 Campos del documento</span>
+              <span>✏️ ¿Deseas editar campos del documento?</span>
               <span className="text-gray-500">{docOpen ? '▴' : '▾'}</span>
             </button>
             {docOpen && (
@@ -324,12 +372,12 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           <div className="flex gap-2">
             <button onClick={() => generarDoc(false, docFields)} disabled={generandoDoc}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-700 text-gray-200 text-xs hover:bg-gray-800 transition-all disabled:opacity-50">
-              {generandoDoc ? '⏳...' : '📄 Descargar Word'}
+              📄 Descargar Word
             </button>
             <button onClick={() => generarDoc(true, docFields)} disabled={generandoDoc}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
               style={{ background: '#06b6d4', color: '#000' }}>
-              {generandoDoc ? '⏳...' : '📋 Descargar PDF'}
+              📋 Descargar PDF
             </button>
           </div>
           <div className="flex justify-end mt-3">
@@ -383,12 +431,20 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
         {/* Fecha entrega OT — protagonista */}
         <div className="rounded-xl p-4 mb-4" style={{ background: '#0a1628', border: '1.5px solid #0e7490' }}>
           <label className="text-xs font-bold block mb-2" style={{ color: '#06b6d4' }}>
-            📅 Fecha entrega OT <span className="text-cyan-400">*</span>
+            🗓️ Fecha entrega OT <span className="text-cyan-400">*</span>
             <span className="text-gray-500 font-normal ml-2">— las fechas se calculan automáticamente y son editables</span>
           </label>
-          <input type="date" className="w-full px-4 py-3 rounded-lg border text-white font-semibold outline-none"
-            style={{ borderColor: '#06b6d4', background: '#080f1e', fontSize: '15px' }}
-            value={form.fecha_entrega} onChange={e => set('fecha_entrega', e.target.value)} />
+          <div className="relative">
+            <div className="w-full px-4 py-3 pr-10 rounded-lg border font-semibold cursor-pointer"
+              style={{ borderColor: '#06b6d4', background: '#080f1e', fontSize: '15px', color: form.fecha_entrega ? '#ffffff' : '#4b6a8a' }}
+              onClick={() => { const el = document.getElementById('inp-fecha-entrega'); el?.showPicker ? el.showPicker() : el?.click() }}>
+              {form.fecha_entrega ? fmtFechaModal(form.fecha_entrega) : 'Seleccionar fecha...'}
+            </div>
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-base" style={{ color: '#06b6d4', pointerEvents: 'none' }}>🗓️</span>
+            <input id="inp-fecha-entrega" type="date"
+              style={{ position: 'absolute', opacity: 0, width: 1, height: 1, pointerEvents: 'none' }}
+              value={form.fecha_entrega} onChange={e => set('fecha_entrega', e.target.value)} />
+          </div>
         </div>
 
         {/* Factibilidades + Instalaciones Nuevas — horizontales */}
@@ -408,27 +464,24 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
                   placeholder="0" value={form.cant_fact} onChange={e => set('cant_fact', e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-2 mb-2">
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                    style={{ color: '#5c7a9e' }}
-                    value={form.fi_fact_manual || fechas.fact?.inicio || ''}
-                    onChange={e => set('fi_fact_manual', e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. final</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                    style={{ color: '#5c7a9e' }}
-                    value={form.ff_fact_manual || fechas.fact?.fin || ''}
-                    onChange={e => set('ff_fact_manual', e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. límite</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-cyan-500"
-                    style={{ color: '#06b6d4' }}
-                    value={form.fl_fact_manual || fechas.fact?.limite || ''}
-                    onChange={e => set('fl_fact_manual', e.target.value)} />
-                </div>
+                {[
+                  { label:'F. inicio', field:'fi_fact_manual', fallback: fechas.fact?.inicio, color:'#5c7a9e', id:'inp-fi-fact', bold: false },
+                  { label:'F. final',  field:'ff_fact_manual', fallback: fechas.fact?.fin,    color:'#5c7a9e', id:'inp-ff-fact', bold: false },
+                  { label:'F. límite', field:'fl_fact_manual', fallback: fechas.fact?.limite, color:'#06b6d4', id:'inp-fl-fact', bold: true  },
+                ].map(({label, field, fallback, color, id, bold}) => (
+                  <div key={field}>
+                    <label className="text-xs text-gray-500 block mb-1">{label}</label>
+                    <div className="relative">
+                      <div className={`px-2 py-1.5 pr-6 rounded-lg border border-gray-800 bg-gray-900 text-xs font-mono cursor-pointer${bold ? ' font-semibold' : ''}`}
+                        style={{ color }} onClick={() => { const el = document.getElementById(id); el?.showPicker ? el.showPicker() : el?.click() }}>
+                        {fmtFechaModal(form[field] || fallback)}
+                      </div>
+                      <span style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)', fontSize:9, opacity:0.5, pointerEvents:'none' }}>✏️</span>
+                      <input id={id} type="date" style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                        value={form[field] || fallback || ''} onChange={e => set(field, e.target.value)} />
+                    </div>
+                  </div>
+                ))}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Plazo</label>
                   <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#06b6d4', background: '#0f1a2e' }}>
@@ -458,27 +511,24 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
                   placeholder="0" value={form.cant_inst} onChange={e => set('cant_inst', e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-2 mb-2">
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. inicio</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                    style={{ color: '#5c7a9e' }}
-                    value={form.fi_inst_manual || fechas.inst?.inicio || ''}
-                    onChange={e => set('fi_inst_manual', e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. final</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                    style={{ color: '#5c7a9e' }}
-                    value={form.ff_inst_manual || fechas.inst?.fin || ''}
-                    onChange={e => set('ff_inst_manual', e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">F. límite</label>
-                  <input type="date" className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-xs outline-none focus:border-purple-500"
-                    style={{ color: '#c084fc' }}
-                    value={form.fl_inst_manual || fechas.inst?.limite || ''}
-                    onChange={e => set('fl_inst_manual', e.target.value)} />
-                </div>
+                {[
+                  { label:'F. inicio', field:'fi_inst_manual', fallback: fechas.inst?.inicio, color:'#5c7a9e', id:'inp-fi-inst', bold: false },
+                  { label:'F. final',  field:'ff_inst_manual', fallback: fechas.inst?.fin,    color:'#5c7a9e', id:'inp-ff-inst', bold: false },
+                  { label:'F. límite', field:'fl_inst_manual', fallback: fechas.inst?.limite, color:'#c084fc', id:'inp-fl-inst', bold: true  },
+                ].map(({label, field, fallback, color, id, bold}) => (
+                  <div key={field}>
+                    <label className="text-xs text-gray-500 block mb-1">{label}</label>
+                    <div className="relative">
+                      <div className={`px-2 py-1.5 pr-6 rounded-lg border border-gray-800 bg-gray-900 text-xs font-mono cursor-pointer${bold ? ' font-semibold' : ''}`}
+                        style={{ color }} onClick={() => { const el = document.getElementById(id); el?.showPicker ? el.showPicker() : el?.click() }}>
+                        {fmtFechaModal(form[field] || fallback)}
+                      </div>
+                      <span style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)', fontSize:9, opacity:0.5, pointerEvents:'none' }}>✏️</span>
+                      <input id={id} type="date" style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                        value={form[field] || fallback || ''} onChange={e => set(field, e.target.value)} />
+                    </div>
+                  </div>
+                ))}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Plazo</label>
                   <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#c084fc', background: '#0f1a2e' }}>
