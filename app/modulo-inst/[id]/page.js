@@ -310,13 +310,18 @@ export default function ModuloPage() {
   }
 
   const stats = {
-    total: ots.length,
+    total: ots.filter(o => o.actividad === 'factibilidades').length, // total OTs (por numero_ot único)
     cumplió_tiempo: ots.filter(o => o.estado === 1).length,
     cumplió_tarde: ots.filter(o => o.estado === 2).length,
     en_proceso: ots.filter(o => o.estado === 3).length,
     por_vencer: ots.filter(o => o.estado === 4).length,
     fuera: ots.filter(o => o.estado === 5).length,
     pen_total: ots.reduce((s, o) => s + (o.val_total_penalidad || 0), 0),
+    // Cantidades por actividad
+    fact_prog: ots.filter(o => o.actividad === 'factibilidades').reduce((s, o) => s + (o.cantidad_programada || 0), 0),
+    fact_ent:  ots.filter(o => o.actividad === 'factibilidades').reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
+    inst_prog: ots.filter(o => o.actividad === 'instalaciones').reduce((s, o) => s + (o.cantidad_programada || 0), 0),
+    inst_ent:  ots.filter(o => o.actividad === 'instalaciones').reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
   }
 
   const otsFiltradas = ots.filter(ot => {
@@ -527,7 +532,7 @@ export default function ModuloPage() {
       const disposition = res.headers.get('Content-Disposition') || ''
       const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
       const m = disposition.match(/filename="([^"]+)"/)
-      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${vars.numero_ot}_Instalaciones.docx`)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.docx`)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = filename
@@ -591,7 +596,7 @@ export default function ModuloPage() {
       const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.pdf`
+      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       mostrarToast('pdf-ok', 'ok')
@@ -832,22 +837,68 @@ export default function ModuloPage() {
         </div>
       )}
 
-      {/* Cards de estado */}
-      <div className="grid gap-3 px-6 py-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
-        {[
-          { label: 'Total', value: stats.total, color: modulo.color },
-          { label: '✓ Cumplió a tiempo', value: stats.cumplió_tiempo, color: '#22c55e' },
-          { label: '⚠ Cumplió tarde', value: stats.cumplió_tarde, color: '#f97316' },
-          { label: '● En proceso', value: stats.en_proceso, color: '#3b82f6' },
-          { label: '⚡ Por vencer', value: stats.por_vencer, color: '#eab308' },
-          { label: '✗ Fuera de plazo', value: stats.fuera, color: '#ef4444' },
-          ...(modulo.tiene_penalidad && isColVisible('val_total') ? [{ label: '💰 Penalidades', value: fmtMoneda(stats.pen_total), color: '#f43f5e', small: true }] : []),
-        ].map((c, i) => (
-          <div key={i} className="card py-3 px-4" style={{ borderTop: `2px solid ${c.color}` }}>
-            <div className="text-xs text-gray-500 uppercase tracking-wider leading-tight">{c.label}</div>
-            <div className={`font-bold font-mono mt-1 ${c.small ? 'text-sm' : 'text-2xl'}`} style={{ color: c.color }}>{c.value}</div>
+      {/* KPIs */}
+      <div className="grid gap-2 px-6 py-3" style={{ gridTemplateColumns: '1fr 1fr 0.6fr 0.6fr' }}>
+
+        {/* Factibilidades */}
+        <div className="card py-2.5 px-3" style={{ border: '1.5px solid #1D9E75' }}>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Factibilidades</div>
+          <div className="flex items-baseline gap-1.5 mb-1.5">
+            <span className="text-xl font-bold font-mono" style={{ color: '#1D9E75' }}>{stats.fact_ent}</span>
+            <span className="text-xs text-gray-500">entregadas</span>
           </div>
-        ))}
+          <div style={{ height: 4, background: '#1e293b', borderRadius: 2, marginBottom: 6, overflow: 'hidden' }}>
+            <div style={{ height: '100%', borderRadius: 2, background: '#1D9E75', width: `${stats.fact_prog ? Math.round(stats.fact_ent / stats.fact_prog * 100) : 0}%` }} />
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-500">Prog. <span className="text-gray-300">{stats.fact_prog}</span></span>
+            <span className="text-gray-500">Pend. <span className="text-gray-300">{Math.max(0, stats.fact_prog - stats.fact_ent)}</span></span>
+            <span style={{ color: '#1D9E75', fontWeight: 500 }}>{stats.fact_prog ? Math.round(stats.fact_ent / stats.fact_prog * 100) : 0}%</span>
+          </div>
+        </div>
+
+        {/* Instalaciones Nuevas */}
+        <div className="card py-2.5 px-3" style={{ border: '1.5px solid #7F77DD' }}>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Instalaciones nuevas</div>
+          <div className="flex items-baseline gap-1.5 mb-1.5">
+            <span className="text-xl font-bold font-mono" style={{ color: '#7F77DD' }}>{stats.inst_ent}</span>
+            <span className="text-xs text-gray-500">entregadas</span>
+          </div>
+          <div style={{ height: 4, background: '#1e293b', borderRadius: 2, marginBottom: 6, overflow: 'hidden' }}>
+            <div style={{ height: '100%', borderRadius: 2, background: '#7F77DD', width: `${stats.inst_prog ? Math.round(stats.inst_ent / stats.inst_prog * 100) : 0}%` }} />
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-500">Prog. <span className="text-gray-300">{stats.inst_prog}</span></span>
+            <span className="text-gray-500">Pend. <span className="text-gray-300">{Math.max(0, stats.inst_prog - stats.inst_ent)}</span></span>
+            <span style={{ color: '#7F77DD', fontWeight: 500 }}>{stats.inst_prog ? Math.round(stats.inst_ent / stats.inst_prog * 100) : 0}%</span>
+          </div>
+        </div>
+
+        {/* Total OTs */}
+        <div className="card py-2.5 px-3" style={{ borderTop: `2px solid ${modulo?.color || '#378ADD'}` }}>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Total OTs</div>
+          <div className="text-xl font-bold font-mono" style={{ color: modulo?.color || '#378ADD' }}>{stats.total}</div>
+          <div className="text-xs text-gray-600 mt-1">año {anioSelec}</div>
+        </div>
+
+        {/* Estado */}
+        <div className="card py-2.5 px-3" style={{ borderTop: '2px solid #374151' }}>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Estado</div>
+          <div className="flex flex-col gap-1">
+            {[
+              { label: 'A tiempo',    val: stats.cumplió_tiempo, bg: '#052e16', color: '#22c55e' },
+              { label: 'En proceso',  val: stats.en_proceso,     bg: '#1e3a5f', color: '#3b82f6' },
+              { label: 'Por vencer',  val: stats.por_vencer,     bg: '#422006', color: '#f97316' },
+              { label: 'Fuera plazo', val: stats.fuera,          bg: '#450a0a', color: '#ef4444' },
+            ].map(s => (
+              <div key={s.label} className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">{s.label}</span>
+                <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded" style={{ background: s.bg, color: s.color }}>{s.val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
 
       {/* Tabs */}

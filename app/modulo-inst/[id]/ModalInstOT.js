@@ -270,7 +270,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${vars.numero_ot}_Instalaciones_Nuevas.${pdf ? 'pdf' : 'docx'}`
+      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.${pdf ? 'pdf' : 'docx'}`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       const okStatus = pdf ? 'pdf-ok' : 'word-ok'
