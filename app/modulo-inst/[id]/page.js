@@ -530,7 +530,16 @@ export default function ModuloPage() {
     const vars = {
       numero_ot:          String(numeroOt || ''),
       contrato:           (ot.contrato || contWord?.contrato || '').replace(/^contrato\s+/i,'').trim(),
-      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      fecha_entrega:      (() => {
+        const fe = fact.datos_extra?.doc_fecha_entrega
+        if (fe) return fmtEntrega(fe)
+        // Fallback: fecha_inicio - 1 día (entrega = inicio - 1 según fórmula Excel)
+        if (fact.fecha_inicio) {
+          const d = new Date(fact.fecha_inicio + 'T00:00:00'); d.setDate(d.getDate() - 1)
+          return fmtEntrega(d.toISOString().slice(0,10))
+        }
+        return ''
+      })(),
       titulo:             fact.datos_extra?.doc_titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
       editado_por:        fact.datos_extra?.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
       firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
@@ -604,7 +613,16 @@ export default function ModuloPage() {
     const vars = {
       numero_ot:          String(numeroOt||''),
       contrato:           (ot.contrato||contPdf?.contrato||'').replace(/^contrato\s+/i,'').trim(),
-      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      fecha_entrega:      (() => {
+        const fe = fact.datos_extra?.doc_fecha_entrega
+        if (fe) return fmtEntrega(fe)
+        // Fallback: fecha_inicio - 1 día (entrega = inicio - 1 según fórmula Excel)
+        if (fact.fecha_inicio) {
+          const d = new Date(fact.fecha_inicio + 'T00:00:00'); d.setDate(d.getDate() - 1)
+          return fmtEntrega(d.toISOString().slice(0,10))
+        }
+        return ''
+      })(),
       titulo:             fact.datos_extra?.doc_titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
       editado_por:        fact.datos_extra?.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
       firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
@@ -1090,13 +1108,16 @@ export default function ModuloPage() {
                         const key = String(ot.numero_ot)
                         if (!vistos.has(key)) {
                           vistos.add(key)
-                          grupos.push(otsFiltradas.filter(o => String(o.numero_ot) === key))
+                          const parOTs = otsFiltradas.filter(o => String(o.numero_ot) === key)
+                          grupos.push(parOTs)
                         }
                       }
                       return grupos.flatMap((par, gi) => {
-                        const fact = par.find(o => o.actividad === 'factibilidades') || par[0]
+                        const fact = par.find(o => o.actividad === 'factibilidades')
                         const inst = par.find(o => o.actividad === 'instalaciones')
-                        const rowSpan = inst ? 2 : 1
+                        const ref = fact || inst
+                        if (!ref) return []
+                        const rowSpan = fact && inst ? 2 : 1
                         const borderBottom = '2px solid #1e3a5f'
 
                         const celdaSpan = (content, extraStyle = {}) => (
@@ -1107,29 +1128,38 @@ export default function ModuloPage() {
 
                         return [fact, inst].filter(Boolean).map((ot, idx) => {
                           const esFirst = idx === 0
-                          const esLast = idx === (inst ? 1 : 0)
+                          const esLast = idx === (fact && inst ? 1 : 0)
                           const info = getEstadoInfo(ot.estado)
                           const pct = Math.round((ot.progreso || 0) * 100)
                           const efInfo = getEficienciaLabel(ot.eficiencia)
                           const rowBorder = esLast ? '2px solid #1e3a5f' : 'none'
                           return (
-                            <tr key={ot.id} className={!esLast ? 'ot-mid-row' : ''}>
+                            <tr key={`${gi}-${ot.id}`} className={!esLast ? 'ot-mid-row' : ''}>
                               {modoEliminar && esFirst && celdaSpan(<input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ot.id)} onChange={() => toggleSeleccion(ot.id)} />)}
                               {todasColsOrdenadas.map(col => {
                                 const k = col.key
                                 // Columnas con rowspan — solo se renderizan en la primera fila
                                 if (['numero_registro','contratista','contrato'].includes(k)) {
                                   if (!esFirst) return null
-                                  if (k === 'numero_registro') return <td key={k} rowSpan={rowSpan} style={{minWidth:90,width:90,padding:'4px 8px',textAlign:'center',background:'#0d1526',borderRight:'2px solid #1e293b',position:'sticky',left:0,zIndex:1,borderBottom,verticalAlign:'middle'}}><span className="font-mono font-bold text-blue-400" style={{fontSize:'13px'}}>{`OT-${String(fact.numero_ot).padStart(2,'0')}`}</span></td>
-                                  if (k === 'contratista') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:fact._cont?.color||'#666'}}/><span className="text-xs">{fact._cont?.nombre||'—'}</span></div></td>
-                                  if (k === 'contrato') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><span className="text-xs text-gray-500">{fact.contrato||fact._cont?.contrato||'—'}</span></td>
+                                  if (k === 'numero_registro') return <td key={k} rowSpan={rowSpan} style={{minWidth:90,width:90,padding:'4px 8px',textAlign:'center',background:'#0d1526',borderRight:'2px solid #1e293b',position:'sticky',left:0,zIndex:1,borderBottom,verticalAlign:'middle'}}><span className="font-mono font-bold text-blue-400" style={{fontSize:'13px'}}>{`OT-${String(ref.numero_ot).padStart(2,'0')}`}</span></td>
+                                  if (k === 'contratista') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:ref._cont?.color||'#666'}}/><span className="text-xs">{ref._cont?.nombre||'—'}</span></div></td>
+                                  if (k === 'contrato') return <td key={k} rowSpan={rowSpan} style={{borderBottom,verticalAlign:'middle'}}><span className="text-xs text-gray-500">{ref.contrato||ref._cont?.contrato||'—'}</span></td>
                                 }
                                 if (k === 'inst_seguim') return null
                                 if (k === 'inst_doc') return null
                                 if (k === 'inst_editar') return null
                                 if (k === 'acciones') {
                                   if (!esFirst) return null
-                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:90,minWidth:90}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact)} onPdf={()=>generarPdfDirecto(fact)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg({fact, inst}); setModalSegInst(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(fact.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(fact.id)}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
+                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:90,minWidth:90}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact||inst)} onPdf={()=>generarPdfDirecto(fact||inst)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg({fact, inst}); setModalSegInst(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ref.id)?'text-red-400':'text-gray-600'}`} onClick={()=>{
+                    // Seleccionar/deseleccionar fact e inst juntos
+                    setSeleccionados(prev => {
+                      const next = new Set(prev)
+                      const ids = [fact?.id, inst?.id].filter(Boolean)
+                      if (next.has(ref.id)) ids.forEach(id => next.delete(id))
+                      else ids.forEach(id => next.add(id))
+                      return next
+                    })
+                  }}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esInst = ot.actividad === 'instalaciones'

@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { supabase } from '@/lib/supabase'
 
 // Feriados exactos del Excel (columnas L y M — nacionales y locales Puno)
@@ -127,6 +127,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   const [docOpen, setDocOpen] = useState(false)
   const [otGuardada, setOtGuardada] = useState(null)
   const [editadoPor, setEditadoPor] = useState('ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES')
+  const [errorFecha, setErrorFecha] = useState('')
   const [generandoDoc, setGenerandoDoc] = useState(false)
   const [docStatus, setDocStatus] = useState(null) // null | 'word-gen' | 'word-ok' | 'pdf-gen' | 'pdf-ok' | 'error'
 
@@ -158,7 +159,61 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
     const capFact = capacidades?.fact || 20
     const capInst = capacidades?.inst || 25
     setFechas(calcularFechas(form.fecha_entrega, form.cant_fact, form.cant_inst, capFact, capInst, feriadosSet))
+    // Limpiar overrides manuales cuando cambia la fecha de entrega o cantidades
+    set('fi_fact_manual', ''); set('ff_fact_manual', ''); set('fl_fact_manual', '')
+    set('fi_inst_manual', ''); set('ff_inst_manual', ''); set('fl_inst_manual', '')
   }, [form.fecha_entrega, form.cant_fact, form.cant_inst, capacidades, feriadosDB])
+
+  // Recalcular fecha límite cuando el usuario edita manualmente F. Final
+  useEffect(() => {
+    const ff = form.ff_fact_manual
+    if (!ff) return
+    // WORKDAY: si fin es sábado → +2, si no → +1
+    const dt = new Date(ff + 'T00:00:00')
+    const feriadosSet = feriadosDB?.length ? new Set(feriadosDB.map(f => f.fecha)) : FERIADOS_DEFAULT
+    const dow = dt.getDay()
+    let limite = new Date(ff + 'T00:00:00')
+    let restante = dow === 6 ? 2 : 1
+    while (restante > 0) {
+      limite.setDate(limite.getDate() + 1)
+      const iso = limite.toISOString().slice(0,10)
+      if (limite.getDay() !== 0 && limite.getDay() !== 6 && !feriadosSet.has(iso)) restante--
+    }
+    set('fl_fact_manual', limite.toISOString().slice(0,10))
+  }, [form.ff_fact_manual])
+
+  useEffect(() => {
+    const ff = form.ff_inst_manual
+    if (!ff) return
+    const dt = new Date(ff + 'T00:00:00')
+    const feriadosSet = feriadosDB?.length ? new Set(feriadosDB.map(f => f.fecha)) : FERIADOS_DEFAULT
+    const dow = dt.getDay()
+    let limite = new Date(ff + 'T00:00:00')
+    let restante = dow === 6 ? 2 : 1
+    while (restante > 0) {
+      limite.setDate(limite.getDate() + 1)
+      const iso = limite.toISOString().slice(0,10)
+      if (limite.getDay() !== 0 && limite.getDay() !== 6 && !feriadosSet.has(iso)) restante--
+    }
+    set('fl_inst_manual', limite.toISOString().slice(0,10))
+  }, [form.ff_inst_manual])
+
+  // Validar que F. inicio no sea anterior a fecha de entrega OT
+  useEffect(() => {
+    if (form.fi_fact_manual && form.fecha_entrega && form.fi_fact_manual < form.fecha_entrega) {
+      setErrorFecha('La fecha de inicio no puede ser anterior a la fecha de entrega OT.')
+      setTimeout(() => setErrorFecha(''), 3500)
+      set('fi_fact_manual', fechas.fact?.inicio || form.fecha_entrega)
+    }
+  }, [form.fi_fact_manual])
+
+  useEffect(() => {
+    if (form.fi_inst_manual && form.fecha_entrega && form.fi_inst_manual < form.fecha_entrega) {
+      setErrorFecha('La fecha de inicio no puede ser anterior a la fecha de entrega OT.')
+      setTimeout(() => setErrorFecha(''), 3500)
+      set('fi_inst_manual', fechas.inst?.inicio || form.fecha_entrega)
+    }
+  }, [form.fi_inst_manual])
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
@@ -237,7 +292,15 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
     const vars = {
       numero_ot:          String(fact.numero_ot || ''),
       contrato:           (fact.contrato || '').replace(/^contrato\s+/i,'').trim(),
-      fecha_entrega:      fmtEntrega(fact.datos_extra?.doc_fecha_entrega),
+      fecha_entrega:      (() => {
+        const fe = fact.datos_extra?.doc_fecha_entrega
+        if (fe) return fmtEntrega(fe)
+        if (fact.fecha_inicio) {
+          const d = new Date(fact.fecha_inicio + 'T00:00:00'); d.setDate(d.getDate() - 1)
+          return fmtEntrega(d.toISOString().slice(0,10))
+        }
+        return ''
+      })(),
       titulo:             docFields.titulo || 'ÓRDENES DE TRABAJO - INSTALACIONES NUEVAS Y FACTIBILIDAD DE SUMINISTROS',
       editado_por:        docFields.editado_por || 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES',
       detalle_fact:       docFields.detalle_fact || 'Adjunto listado OT por correo electrónico',
@@ -368,7 +431,25 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
             )}
           </div>
 
-          {/* Botones */}
+        {/* Mini modal error fecha */}
+      {errorFecha && typeof window !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl p-6 flex flex-col items-center gap-3 text-center shadow-2xl"
+            style={{ background: '#0f1a2e', border: '1.5px solid #dc2626', minWidth: 300, maxWidth: 360 }}>
+            <div style={{ fontSize: 36 }}>📅</div>
+            <p className="text-white font-semibold text-sm">Fecha no válida</p>
+            <p className="text-gray-400 text-xs">{errorFecha}</p>
+            <button onClick={() => setErrorFecha('')}
+              className="mt-2 px-6 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: '#dc2626', color: '#fff' }}>
+              Aceptar
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
+
+        {/* Botones */}
           <div className="flex gap-2">
             <button onClick={() => generarDoc(false, docFields)} disabled={generandoDoc}
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-700 text-gray-200 text-xs hover:bg-gray-800 transition-all disabled:opacity-50">
@@ -465,27 +546,52 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
               </div>
               <div className="grid grid-cols-2 gap-2 mb-2">
                 {[
-                  { label:'F. inicio', field:'fi_fact_manual', fallback: fechas.fact?.inicio, color:'#5c7a9e', id:'inp-fi-fact', bold: false },
+                  { label:'F. inicio', field:'fi_fact_manual', fallback: fechas.fact?.inicio, color:'#5c7a9e', id:'inp-fi-fact', bold: false, esFi: true },
                   { label:'F. final',  field:'ff_fact_manual', fallback: fechas.fact?.fin,    color:'#5c7a9e', id:'inp-ff-fact', bold: false },
                   { label:'F. límite', field:'fl_fact_manual', fallback: fechas.fact?.limite, color:'#06b6d4', id:'inp-fl-fact', bold: true  },
-                ].map(({label, field, fallback, color, id, bold}) => (
+                ].map(({label, field, fallback, color, id, bold, esFi}) => (
                   <div key={field}>
                     <label className="text-xs text-gray-500 block mb-1">{label}</label>
                     <div className="relative">
                       <div className={`px-2 py-1.5 pr-6 rounded-lg border border-gray-800 bg-gray-900 text-xs font-mono cursor-pointer${bold ? ' font-semibold' : ''}`}
-                        style={{ color }} onClick={() => { const el = document.getElementById(id); el?.showPicker ? el.showPicker() : el?.click() }}>
+                        style={{ color }} onClick={() => {
+                          const el = document.getElementById(id)
+                          if (esFi && form.fecha_entrega) {
+                            setErrorFecha('La fecha de inicio no puede ser anterior a la fecha de entrega OT (' + (() => { const d = new Date(form.fecha_entrega+'T00:00:00'); return String(d.getDate()).padStart(2,'0')+'/'+(d.getMonth()+1)+'/'+d.getFullYear() })() + ').')
+                            setTimeout(() => setErrorFecha(''), 4000)
+                            setTimeout(() => { if (el) { el?.showPicker ? el.showPicker() : el?.click() } }, 50)
+                            return
+                          }
+                          if (el) { el?.showPicker ? el.showPicker() : el?.click() }
+                        }}>
                         {fmtFechaModal(form[field] || fallback)}
                       </div>
                       <span style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)', fontSize:9, opacity:0.5, pointerEvents:'none' }}>✏️</span>
-                      <input id={id} type="date" style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
-                        value={form[field] || fallback || ''} onChange={e => set(field, e.target.value)} />
+                      {esFi ? (
+                        <input id={id} type="date"
+                          style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                          min={form.fecha_entrega || ''}
+                          value={form[field] || fallback || ''}
+                          onChange={e => set(field, e.target.value)} />
+                      ) : (
+                        <input id={id} type="date"
+                          style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                          value={form[field] || fallback || ''}
+                          onChange={e => set(field, e.target.value)} />
+                      )}
                     </div>
                   </div>
                 ))}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Plazo</label>
                   <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#06b6d4', background: '#0f1a2e' }}>
-                    {fechas.fact?.plazo ? `${fechas.fact.plazo} días háb.` : '—'}
+                    {(() => {
+                      const ini = form.fi_fact_manual || fechas.fact?.inicio
+                      const fin = form.ff_fact_manual || fechas.fact?.fin
+                      if (!ini || !fin) return '—'
+                      const dias = Math.round((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00')) / 86400000) + 1
+                      return `${dias} días háb.`
+                    })()}
                   </div>
                 </div>
               </div>
@@ -512,27 +618,50 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
               </div>
               <div className="grid grid-cols-2 gap-2 mb-2">
                 {[
-                  { label:'F. inicio', field:'fi_inst_manual', fallback: fechas.inst?.inicio, color:'#5c7a9e', id:'inp-fi-inst', bold: false },
+                  { label:'F. inicio', field:'fi_inst_manual', fallback: fechas.inst?.inicio, color:'#5c7a9e', id:'inp-fi-inst', bold: false, esFi: true },
                   { label:'F. final',  field:'ff_inst_manual', fallback: fechas.inst?.fin,    color:'#5c7a9e', id:'inp-ff-inst', bold: false },
                   { label:'F. límite', field:'fl_inst_manual', fallback: fechas.inst?.limite, color:'#c084fc', id:'inp-fl-inst', bold: true  },
-                ].map(({label, field, fallback, color, id, bold}) => (
+                ].map(({label, field, fallback, color, id, bold, esFi}) => (
                   <div key={field}>
                     <label className="text-xs text-gray-500 block mb-1">{label}</label>
                     <div className="relative">
                       <div className={`px-2 py-1.5 pr-6 rounded-lg border border-gray-800 bg-gray-900 text-xs font-mono cursor-pointer${bold ? ' font-semibold' : ''}`}
-                        style={{ color }} onClick={() => { const el = document.getElementById(id); el?.showPicker ? el.showPicker() : el?.click() }}>
+                        style={{ color }} onClick={() => {
+                          const el = document.getElementById(id)
+                          if (esFi && form.fecha_entrega) {
+                            setErrorFecha('La fecha de inicio no puede ser anterior a la fecha de entrega OT (' + (() => { const d = new Date(form.fecha_entrega+'T00:00:00'); return String(d.getDate()).padStart(2,'0')+'/'+(d.getMonth()+1)+'/'+d.getFullYear() })() + ').')
+                            setTimeout(() => setErrorFecha(''), 4000)
+                            setTimeout(() => { if (el) { el?.showPicker ? el.showPicker() : el?.click() } }, 50)
+                            return
+                          }
+                          if (el) { el?.showPicker ? el.showPicker() : el?.click() }
+                        }}>
                         {fmtFechaModal(form[field] || fallback)}
                       </div>
                       <span style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)', fontSize:9, opacity:0.5, pointerEvents:'none' }}>✏️</span>
-                      <input id={id} type="date" style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
-                        value={form[field] || fallback || ''} onChange={e => set(field, e.target.value)} />
+                      {esFi ? (
+                        <input id={id} type="date"
+                          style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                          min={form.fecha_entrega || ''}
+                          value={form[field] || fallback || ''}
+                          onChange={e => set(field, e.target.value)} />
+                      ) : (
+                        <input id={id} type="date" style={{ position:'absolute', opacity:0, width:1, height:1, pointerEvents:'none' }}
+                          value={form[field] || fallback || ''} onChange={e => set(field, e.target.value)} />
+                      )}
                     </div>
                   </div>
                 ))}
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Plazo</label>
                   <div className="px-2 py-1.5 rounded-lg border border-gray-800 text-xs text-center" style={{ color: '#c084fc', background: '#0f1a2e' }}>
-                    {fechas.inst?.plazo ? `${fechas.inst.plazo} días háb.` : '—'}
+                    {(() => {
+                      const ini = form.fi_inst_manual || fechas.inst?.inicio
+                      const fin = form.ff_inst_manual || fechas.inst?.fin
+                      if (!ini || !fin) return '—'
+                      const dias = Math.round((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00')) / 86400000) + 1
+                      return `${dias} días háb.`
+                    })()}
                   </div>
                 </div>
               </div>
