@@ -7,7 +7,7 @@ import {
   calcularCamposOT, calcularCamposConEficiencia, getEstadoInfo, getEficienciaLabel, getEficiencia,
   getDiasRestantes, fmtFecha, fmtMoneda, getNombreOT, generarCodigoOT, colLetra
 } from '@/lib/formulas'
-import { exportarExcel, importarExcel } from '@/lib/excel'
+import { exportarExcel, importarExcel, importarExcelInst } from '@/lib/excel'
 import ModalOT from '@/components/ModalOT'
 import ModalInstOT from './ModalInstOT'
 import GanttModulo from '@/components/GanttModulo'
@@ -95,6 +95,9 @@ export default function ModuloPage() {
   const [filtEstado, setFiltEstado] = useState('')
   const [importando, setImportando] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [modalImport, setModalImport] = useState(false)
+  const [importFile, setImportFile] = useState(null)
+  const [importContratista, setImportContratista] = useState('')
   const [seleccionados, setSeleccionados] = useState(new Set())
   const [modoEliminar, setModoEliminar] = useState(false)
   const tablaRef = useRef(null)
@@ -131,7 +134,7 @@ export default function ModuloPage() {
   const cargar = useCallback(async () => {
     const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }, { data: ferData }, { data: capData }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
-      supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).order('numero_ot'),
+      supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).order('numero_ot', { ascending: true }),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
       supabase.from('feriados').select('*').order('fecha'),
@@ -184,7 +187,7 @@ export default function ModuloPage() {
     setCamposExtra(campos || [])
     // numero_registro is always the positional row number within this module
     // Sort by id (insertion order) to get consistent numbering
-    const sortedOts = (otsData || []).slice().sort((a,b) => a.id - b.id)
+    const sortedOts = (otsData || []).slice().sort((a,b) => Number(a.numero_ot) - Number(b.numero_ot) || a.id - b.id)
     const calculadas = sortedOts.map((ot, idx) => {
       const cont = contsOrdenados.find(c => c.id === ot.contratista_id)
       return {
@@ -389,22 +392,53 @@ export default function ModuloPage() {
     else setSeleccionados(new Set(otsFiltradas.map(o => o.id)))
   }
 
-  async function handleImport(e) {
+  function handleImportSelect(e) {
     const file = e.target.files[0]
     if (!file) return
+    setImportFile(file)
+    setImportContratista(contratistas[0]?.id ? String(contratistas[0].id) : '')
+    setImportResult(null)
+    setModalImport(true)
+    e.target.value = ''
+  }
+
+  async function ejecutarImport() {
+    if (!importFile) return
     setImportando(true); setImportResult(null)
     try {
-      const actividades = Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')
-      // baseIndex = total actual de registros, para que numero_registro siga la secuencia
-      const { ots: otsImport, errores, advertencias } = await importarExcel(file, contratistas, parseInt(id), actividades, ots.length, camposExtra, motivos)
+      const cont = contratistas.find(c => String(c.id) === importContratista)
+      const { ots: otsImport, errores, advertencias, total } = await importarExcelInst(importFile, {
+        moduloId: parseInt(id),
+        contratista: cont,
+        contrato: cont?.contrato || '',
+        anio: anioSelec,
+        camposExtra,
+      })
       if (otsImport.length > 0) {
-        const { error } = await supabase.from('ots').insert(otsImport)
-        if (error) throw new Error(error.message)
-        await cargar()
+        // Verificar cuáles ya existen (por numero_ot + actividad)
+        const existentes = new Set(ots.map(o => `${o.numero_ot}_${o.actividad}`))
+        const nuevas = otsImport.filter(o => !existentes.has(`${o.numero_ot}_${o.actividad}`))
+        const saltadas = otsImport.length - nuevas.length
+        if (nuevas.length > 0) {
+          // Insertar en batches de 50 para evitar timeout
+          const BATCH = 50
+          for (let b = 0; b < nuevas.length; b += BATCH) {
+            const batch = nuevas.slice(b, b + BATCH)
+            const { error } = await supabase.from('ots').insert(batch)
+            if (error) throw new Error(error.message)
+          }
+          await cargar()
+        }
+        if (saltadas > 0)
+          advertencias.push(`${saltadas} fila(s) ya existían en el sistema — se omitieron.`)
+        setImportResult({ ok: nuevas.length, total, errores, advertencias })
+      } else {
+        setImportResult({ ok: 0, total: 0, errores, advertencias })
       }
-      setImportResult({ ok: otsImport.length, errores, advertencias })
-    } catch (err) { setImportResult({ error: err.message || String(err) }) }
-    setImportando(false); e.target.value = ''
+    } catch (err) {
+      setImportResult({ error: err.message || String(err) })
+    }
+    setImportando(false)
   }
 
   async function moverCampo(campoId, dir) {
@@ -814,9 +848,31 @@ export default function ModuloPage() {
           </div>
           <label className="btn-ghost cursor-pointer text-xs">
             {importando ? '⏳...' : '⬆️ Importar Excel'}
-            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImport} disabled={importando} />
+            <input type="file" accept=".xlsx,.xls,.xlsm" className="hidden" onChange={handleImportSelect} disabled={importando} />
           </label>
-          <button className="btn-ghost text-xs" onClick={() => exportarExcel(otsFiltradas, contratistas, modulo, periodo, colsVisibles, camposExtra, todasColsOrdenadas.filter(c => c.key !== 'acciones' && c.key !== 'numero_registro'))}>⬇️ Exportar Excel</button>
+          <button className="btn-ghost text-xs" onClick={async () => {
+            try {
+              const res = await fetch('/api/genexcel-inst', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  ots: otsFiltradas,
+                  contratistas,
+                  modulo,
+                  anio: anioSelec,
+                  camposExtra,
+                })
+              })
+              if (!res.ok) { alert('Error al exportar: ' + await res.text()); return }
+              const blob = await res.blob()
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `Instalaciones_Nuevas_${anioSelec}.xlsx`
+              document.body.appendChild(a); a.click(); document.body.removeChild(a)
+              setTimeout(() => URL.revokeObjectURL(url), 10000)
+            } catch(e) { alert('Error: ' + e.message) }
+          }}>⬇️ Exportar Excel</button>
           <button className="btn-primary text-xs" onClick={() => { setEditando(null); setModalOpen(true) }}>+ Nuevo Registro</button>
         </div>
       </div>
@@ -1353,7 +1409,83 @@ export default function ModuloPage() {
         />
       )}
 
-      {/* ── MODAL SEGUIMIENTO INST ── */}
+      {/* ── MODAL IMPORTAR EXCEL ── */}
+      {modalImport && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="rounded-2xl border border-gray-700 p-6 w-full max-w-md" style={{ background: '#0f1a2e' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-white">⬆️ Importar OTs</h3>
+              <button onClick={() => { setModalImport(false); setImportFile(null); setImportResult(null) }}
+                className="text-gray-500 hover:text-white">✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="mb-4 p-3 rounded-lg text-xs text-gray-400" style={{ background: '#0a1220', border: '1px solid #1e3a5f' }}>
+                  <p className="font-semibold text-blue-400 mb-1">📄 {importFile?.name}</p>
+                  <p>El sistema reconocerá automáticamente las columnas aunque los nombres varíen.</p>
+                  <p className="mt-1">Las OTs que ya existen se omitirán. El estado lo asigna el sistema.</p>
+                </div>
+
+                <div className="mb-4">
+                  <label className="text-xs text-gray-400 block mb-1">Contratista <span className="text-cyan-400">*</span></label>
+                  <select className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
+                    value={importContratista} onChange={e => setImportContratista(e.target.value)}>
+                    <option value="">— Seleccionar —</option>
+                    {contratistas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                  <p className="text-xs text-gray-600 mt-1">Se asignará a todas las OTs importadas.</p>
+                </div>
+
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => { setModalImport(false); setImportFile(null) }}
+                    className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">
+                    Cancelar
+                  </button>
+                  <button onClick={ejecutarImport} disabled={importando || !importContratista}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    style={{ background: '#06b6d4', color: '#000' }}>
+                    {importando ? '⏳ Importando...' : '⬆️ Importar'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {importResult.error ? (
+                  <div className="p-3 rounded-lg bg-red-950 border border-red-800 text-xs text-red-300 mb-4">
+                    ❌ {importResult.error}
+                  </div>
+                ) : (
+                  <div className="space-y-3 mb-4">
+                    <div className="p-3 rounded-lg text-xs" style={{ background: '#052e16', border: '1px solid #166534' }}>
+                      <p className="text-green-400 font-semibold">
+                        ✅ {importResult.ok} fila(s) importadas de {(importResult.total || 0) * 2} ({importResult.total} OTs)
+                      </p>
+                    </div>
+                    {importResult.advertencias?.length > 0 && (
+                      <div className="p-3 rounded-lg text-xs max-h-32 overflow-y-auto" style={{ background: '#1c1200', border: '1px solid #854d0e' }}>
+                        <p className="text-yellow-400 font-semibold mb-1">⚠️ Advertencias:</p>
+                        {importResult.advertencias.map((a, i) => <p key={i} className="text-yellow-300 mt-0.5">· {a}</p>)}
+                      </div>
+                    )}
+                    {importResult.errores?.length > 0 && (
+                      <div className="p-3 rounded-lg text-xs max-h-32 overflow-y-auto" style={{ background: '#1c0101', border: '1px solid #991b1b' }}>
+                        <p className="text-red-400 font-semibold mb-1">❌ Errores:</p>
+                        {importResult.errores.map((e, i) => <p key={i} className="text-red-300 mt-0.5">· {e}</p>)}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <button onClick={() => { setModalImport(false); setImportFile(null); setImportResult(null) }}
+                  className="w-full py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">
+                  Cerrar
+                </button>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
       {modalSegInst && otSeg && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
           <div className="rounded-2xl border border-gray-700 p-6 w-full max-w-sm" style={{ background: '#0f1a2e' }}>

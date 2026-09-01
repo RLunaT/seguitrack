@@ -8,9 +8,14 @@ async function hashPin(pin) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+const BOTS_CALLMEBOT = [
+  { numero: '+34644663262', label: '+34 644 66 32 62 (Bot 1)' },
+  { numero: '+34623801190', label: '+34 623 80 11 90 (Bot 2)' },
+]
+
 const FORM_DEFAULT = {
   nombre: '', whatsapp: '', callmebot_key: '', pin: '', pin2: '',
-  dias_critico: 3, activo: true
+  dias_critico: 3, activo: true, bot_number: '+34644663262'
 }
 
 const TIPOS_INFO = {
@@ -90,9 +95,10 @@ export default function NotificacionesPage() {
         nombre:        data.nombre || '',
         whatsapp:      data.whatsapp || '',
         callmebot_key: data.callmebot_key || '',
-        pin:           '', pin2: '',  // no pre-rellenamos PIN por seguridad
+        pin:           '', pin2: '',
         dias_critico:  data.dias_critico || 3,
         activo:        data.activo ?? true,
+        bot_number:    data.bot_number || '+34644663262',
       })
       setFormError('')
       setModalOpen('editar')
@@ -130,6 +136,7 @@ export default function NotificacionesPage() {
       nombre:        form.nombre || null,
       whatsapp:      form.whatsapp.trim(),
       callmebot_key: form.callmebot_key.trim(),
+      bot_number:    form.bot_number || '+34644663262',
       pin_hash,
       dias_critico:  Math.min(3, Math.max(1, parseInt(form.dias_critico) || 3)),
       notif_whatsapp: true,
@@ -149,7 +156,8 @@ export default function NotificacionesPage() {
     setProbando(cfg.id); setProbarMsg('')
     try {
       const msg = `🧪 *SeguiTrack - Prueba*\n\nHola ${cfg.nombre || 'usuario'}, las notificaciones están funcionando correctamente ✅`
-      const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(cfg.whatsapp)}&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(cfg.callmebot_key)}`
+      const bot = cfg.bot_number || '+34644663262'
+      const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(cfg.whatsapp)}&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(cfg.callmebot_key)}&bot=${encodeURIComponent(bot)}`
       const res  = await fetch(url)
       const body = await res.text()
       setProbarMsg(res.ok && !body.toLowerCase().includes('error')
@@ -395,11 +403,31 @@ export default function NotificacionesPage() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-gray-400 block mb-1">
+                  Bot de CallMeBot <span className="text-red-400">*</span>
+                </label>
+                <div className="flex gap-2">
+                  {BOTS_CALLMEBOT.map(b => (
+                    <button key={b.numero} type="button"
+                      onClick={() => setForm(p => ({ ...p, bot_number: b.numero }))}
+                      className="flex-1 px-3 py-2 rounded-lg border text-xs font-mono transition-all"
+                      style={form.bot_number === b.numero
+                        ? { background: '#0a2a1a', borderColor: '#22c55e', color: '#22c55e' }
+                        : { background: 'transparent', borderColor: '#374151', color: '#6b7280' }}>
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-600 mt-1">
+                  Selecciona el bot al que enviaste <span className="font-mono text-green-400">I allow callmebot to send me messages</span>
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-400 block mb-1">
                   Mi CallMeBot Key <span className="text-red-400">*</span>
                   <span className="text-gray-600 font-normal ml-1">— solo tú la ves</span>
                 </label>
                 <input className="input-base font-mono" placeholder="Ej: 7260729" value={form.callmebot_key} onChange={e => setForm(p => ({ ...p, callmebot_key: e.target.value }))} />
-                <p className="text-xs text-gray-600 mt-1">Envía <span className="font-mono text-green-400">I allow callmebot to send me messages</span> al <span className="font-mono text-green-400">+34 644 66 32 62</span></p>
+                <p className="text-xs text-gray-600 mt-1">La recibes como respuesta del bot cuando te activas.</p>
               </div>
 
               {/* PIN */}
