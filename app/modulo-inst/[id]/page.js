@@ -368,13 +368,19 @@ export default function ModuloPage() {
     cargar()
   }
 
+  const [confirmEliminar, setConfirmEliminar] = useState(false)
+
   async function eliminarSeleccionados() {
     if (seleccionados.size === 0) return
-    if (!confirm(`¿Eliminar ${seleccionados.size} registro(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return
+    setConfirmEliminar(true)
+  }
+
+  async function confirmarEliminar() {
     const ids = Array.from(seleccionados)
     await supabase.from('ots').delete().in('id', ids)
     setSeleccionados(new Set())
     setModoEliminar(false)
+    setConfirmEliminar(false)
     cargar()
   }
 
@@ -1053,7 +1059,7 @@ export default function ModuloPage() {
                   ) : (
                     <div className="flex gap-1 items-center">
                       <button className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400" onClick={seleccionarTodas}>{seleccionados.size===otsFiltradas.length?'☐ Ninguna':'✅ Todas'}</button>
-                      <button className="btn-danger text-xs px-2 py-1" disabled={seleccionados.size===0} onClick={eliminarSeleccionados}>🗑️{seleccionados.size>0?` (${seleccionados.size})`:''}</button>
+                      <button className="btn-danger text-xs px-2 py-1" disabled={seleccionados.size===0} onClick={eliminarSeleccionados}>🗑️{seleccionados.size>0?` (${Math.ceil(seleccionados.size/2)})`:''}</button>
                       <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{setModoEliminar(false);setSeleccionados(new Set())}}>✕</button>
                     </div>
                   )}
@@ -1135,7 +1141,15 @@ export default function ModuloPage() {
                           const rowBorder = esLast ? '2px solid #1e3a5f' : 'none'
                           return (
                             <tr key={`${gi}-${ot.id}`} className={!esLast ? 'ot-mid-row' : ''}>
-                              {modoEliminar && esFirst && celdaSpan(<input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ot.id)} onChange={() => toggleSeleccion(ot.id)} />)}
+                              {modoEliminar && esFirst && celdaSpan(<input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ref.id)} onChange={() => {
+                                setSeleccionados(prev => {
+                                  const next = new Set(prev)
+                                  const ids = [fact?.id, inst?.id].filter(Boolean)
+                                  if (next.has(ref.id)) ids.forEach(id => next.delete(id))
+                                  else ids.forEach(id => next.add(id))
+                                  return next
+                                })
+                              }} />)}
                               {todasColsOrdenadas.map(col => {
                                 const k = col.key
                                 // Columnas con rowspan — solo se renderizan en la primera fila
@@ -1159,7 +1173,7 @@ export default function ModuloPage() {
                       else ids.forEach(id => next.add(id))
                       return next
                     })
-                  }}>{seleccionados.has(fact.id)?'☑':'☐'}</button>}</div></td>
+                  }}>{seleccionados.has(ref.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esInst = ot.actividad === 'instalaciones'
@@ -1516,6 +1530,29 @@ export default function ModuloPage() {
         </div>,
         document.body
       )}
+      {/* Modal confirmar eliminar */}
+      {confirmEliminar && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <div className="rounded-2xl border border-red-800 p-6 w-full max-w-sm text-center" style={{ background: '#0f1a2e' }}>
+            <div style={{ fontSize: 36 }} className="mb-3">🗑️</div>
+            <p className="text-white font-semibold text-sm mb-1">¿Eliminar {Math.ceil(seleccionados.size / 2)} OT(s) seleccionada(s)?</p>
+            <p className="text-gray-400 text-xs mb-4">Se eliminarán todas sus actividades (Factibilidades e Instalaciones). Esta acción no se puede deshacer.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmEliminar(false)}
+                className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">
+                Cancelar
+              </button>
+              <button onClick={confirmarEliminar}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold"
+                style={{ background: '#dc2626', color: '#fff' }}>
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {modalSegInst && otSeg && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
           <div className="rounded-2xl border border-gray-700 p-6 w-full max-w-sm" style={{ background: '#0f1a2e' }}>
