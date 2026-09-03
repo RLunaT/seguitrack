@@ -1,39 +1,46 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
 
 export default function LayoutClient({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [theme, setTheme] = useState('dark')
+
+  useEffect(() => {
+    const saved = localStorage.getItem('theme') || 'dark'
+    setTheme(saved)
+    document.documentElement.setAttribute('data-theme', saved)
+  }, [])
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    localStorage.setItem('theme', next)
+    document.documentElement.setAttribute('data-theme', next)
+  }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-950 text-gray-100 overflow-hidden">
-
-      {/* Top bar — solo visible en móvil */}
-      <header className="flex md:hidden items-center gap-3 px-4 py-3 border-b border-gray-800 flex-shrink-0"
-        style={{ background: '#0f172a' }}>
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="text-gray-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-800 transition-colors text-xl"
-          aria-label="Abrir menú"
-        >
+    <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      {/* Top bar móvil */}
+      <header className="flex md:hidden items-center gap-3 px-4 py-3 flex-shrink-0"
+        style={{ background: '#0d2d5e', borderBottom: '1px solid #1a4a8f' }}>
+        <button onClick={() => setMobileOpen(true)}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-xl"
+          style={{ color: 'rgba(255,255,255,0.7)' }}>
           ☰
         </button>
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md flex items-center justify-center text-sm"
-            style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
-            📋
-          </div>
-          <span className="text-sm font-bold text-white">SeguiTrack</span>
-        </div>
+        <img src="/logo_electropuno.jpg" alt="Electro Puno" style={{ height: 28, borderRadius: 4 }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>SeguiTrack</span>
       </header>
 
-      {/* Contenido principal */}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           mobileOpen={mobileOpen}
           onMobileClose={() => setMobileOpen(false)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto" style={{ background: 'var(--bg)' }}>
           {children}
         </main>
       </div>

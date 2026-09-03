@@ -201,7 +201,8 @@ export default function ModuloPage() {
   // Tipo de módulo — disponible desde aquí para todo el componente
   const esOT = modulo?.tipo === 'ot'
   function idPrincipal(reg) {
-    return esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
+    const n = esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
+    return esOT ? String(n).padStart(2, '0') : n
   }
   function labelId() { return esOT ? 'N° OT' : 'N° Registro' }
 
@@ -459,7 +460,7 @@ export default function ModuloPage() {
 
     try {
       const payload = {
-        numero_ot:          String(data.numero_ot||''),
+        numero_ot:          String(data.numero_ot||'').padStart(2,'0'),
         codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
         contrato:           limpiarContrato(data.contrato),
         fecha_entrega:      fmtEntrega(data.fecha_entrega),
@@ -530,7 +531,7 @@ export default function ModuloPage() {
 
     try {
       const payload = {
-        numero_ot:          String(data.numero_ot||''),
+        numero_ot:          String(data.numero_ot||'').padStart(2,'0'),
         codigo_ot:          String(data.codigo_ot||data.numero_ot||''),
         contrato:           limpiarContrato(data.contrato),
         fecha_entrega:      fmtEntrega(data.fecha_entrega),
@@ -813,17 +814,32 @@ export default function ModuloPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-6 border-b border-gray-800">
+      <div style={{ display:'flex', gap:6, padding:'10px 24px', borderBottom:'1px solid var(--border)', background:'var(--surface)' }}>
         {[
-          { key: 'tabla', label: '📋 Listado' },
-          { key: 'gantt', label: '📅 Gantt' },
-          { key: 'campos', label: '⚙️ Campos' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-all ${tab === t.key ? 'border-blue-500 text-blue-400 bg-blue-950' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-            {t.label}
-          </button>
-        ))}
+          { key: 'tabla',  icon: '📋', label: 'Listado', color: '#58d5c9' },
+          { key: 'gantt',  icon: '📅', label: 'Gantt',   color: '#a78bfa' },
+          { key: 'campos', icon: '⚙️', label: 'Campos',  color: '#fbbf24' },
+        ].map(t => {
+          const active = tab === t.key
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              onMouseEnter={e => { if(!active) e.currentTarget.style.opacity='0.8' }}
+              onMouseLeave={e => { if(!active) e.currentTarget.style.opacity='1' }}
+              style={{
+                display:'flex', alignItems:'center', gap:7,
+                padding:'6px 16px', borderRadius:7,
+                background: active ? t.color : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${active ? t.color : 'var(--border)'}`,
+                color: active ? '#0d1117' : t.color,
+                fontWeight: active ? 700 : 500,
+                fontSize:12,
+                cursor:'pointer', transition:'all 0.15s', whiteSpace:'nowrap',
+              }}>
+              <span style={{fontSize:14}}>{t.icon}</span>
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-4">
@@ -883,7 +899,7 @@ export default function ModuloPage() {
                     onClick={()=>{setColumnFilters({});setFiltContratista('');setFiltEstado('');setBuscar('')}}>✕</button>
                 )}
                 <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs text-gray-500">{otsFiltradas.length}/{ots.length} registros</span>
+                  <span className="text-xs text-gray-500">{new Set(otsFiltradas.map(o=>o.numero_ot)).size}/{new Set(ots.map(o=>o.numero_ot)).size} OTs</span>
                   {!modoEliminar ? (
                     <button className="btn-ghost text-xs px-2 py-1" onClick={()=>setModoEliminar(true)}>🗑️ Eliminar</button>
                   ) : (
@@ -922,7 +938,7 @@ export default function ModuloPage() {
                         if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
                         // Doc y Acciones: sin handle de resize — ancho fijo siempre,
                         // para que los botones nunca queden tapados.
-                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative'}}>Acciones</th>
+                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative',width:48,minWidth:48,textAlign:'center'}}>Acciones</th>
                         if (col.key === 'accion_doc') return <th key="accdoc" style={{position:'relative'}}>Doc</th>
                         if (col.key.startsWith('extra_')) return <th key={col.key} style={{position:'relative'}}>{col.label}<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,col.key,w)}}/></th>
                         if (['contratista','semana','fecha_inicio','fecha_limite','fecha_reporte','cantidad','estado'].includes(col.key))
@@ -974,11 +990,34 @@ export default function ModuloPage() {
                             }
                             if (k === 'fecha_reporte') {
                               const colorEstado = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
-                              return <td key={k} className="font-mono text-xs" style={{color: colorEstado}}>{fmtFecha(ot.fecha_reporte)}</td>
+                              return (
+                                <td key={k} style={{padding:'2px 8px'}}>
+                                  <button
+                                    onClick={() => { setOtSeg(ot); setModalSeg(true) }}
+                                    title="Registrar seguimiento"
+                                    style={{display:'inline-flex',alignItems:'center',gap:5,background:'transparent',border:'none',cursor:'pointer',padding:'2px 4px',borderRadius:4,transition:'opacity 0.15s'}}
+                                    onMouseEnter={e => e.currentTarget.style.opacity='0.7'}
+                                    onMouseLeave={e => e.currentTarget.style.opacity='1'}
+                                  >
+                                    {ot.fecha_reporte ? (
+                                      <>
+                                        <span className="font-mono text-xs" style={{color:colorEstado}}>{fmtFecha(ot.fecha_reporte)}</span>
+                                        <span style={{width:5,height:5,borderRadius:'50%',background:'#475569',flexShrink:0,display:'inline-block'}}/>
+                                      </>
+                                    ) : (
+                                      <span style={{display:'inline-flex',alignItems:'center',gap:4,background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.28)',borderRadius:999,padding:'2px 9px 2px 7px',color:'#60a5fa',fontSize:10,fontWeight:500,whiteSpace:'nowrap'}}>
+                                        <span style={{fontSize:12}}>👀</span>Reportar
+                                      </span>
+                                    )}
+                                  </button>
+                                </td>
+                              )
                             }
                             if (k === 'estado') {
                               const color = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
-                              return <td key={k} style={{overflow:'hidden'}}><span style={{color, fontSize:'11px', fontWeight:600, whiteSpace:'nowrap'}}>{info.label}</span></td>
+                              const emoji = ot.estado===1?'🥳':ot.estado===2&&ot.fecha_reporte?'👎':null
+                              const labelTxt = emoji ? info.label.replace(/^\S+\s*/,'') : info.label
+                              return <td key={k} style={{overflow:'hidden'}}><span style={{color, fontSize:'11px', fontWeight:600, whiteSpace:'nowrap'}}>{emoji&&<span style={{fontSize:18,marginRight:4}}>{emoji}</span>}{labelTxt}</span></td>
                             }
                             if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
                             if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
@@ -993,7 +1032,7 @@ export default function ModuloPage() {
                             }
                             if (k === 'acciones') {
                               const docEnColumnaPropia = todasColsOrdenadas.some(c => c.key === 'accion_doc')
-                              return <td key="acc">{!modoEliminar?(<div className="flex gap-1">{tienePlantilla&&!docEnColumnaPropia&&<button className="btn-ghost text-xs py-1 px-2" title="Descargar Word" onClick={()=>generarWordDirecto(ot)}>📄</button>}<button className="btn-ghost text-xs py-1 px-2" title="Registrar seguimiento" onClick={()=>{setOtSeg(ot);setModalSeg(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button><button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(ot);setModalOpen(true)}}>✏️</button></div>):(<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ot.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(ot.id)}>{seleccionados.has(ot.id)?'☑':'☐'}</button>)}</td>
+                              return <td key="acc" style={{textAlign:'center',verticalAlign:'middle',width:48,minWidth:48}}>{!modoEliminar?(<div className="flex gap-1 justify-center items-center">{tienePlantilla&&!docEnColumnaPropia&&<button className="btn-ghost text-xs py-1 px-2" title="Descargar Word" onClick={()=>generarWordDirecto(ot)}>📄</button>}<button className="btn-ghost text-xs py-1 px-2" onClick={()=>{setEditando(ot);setModalOpen(true)}}>✏️</button></div>):(<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ot.id)?'text-red-400':'text-gray-600'}`} onClick={()=>toggleSeleccion(ot.id)}>{seleccionados.has(ot.id)?'☑':'☐'}</button>)}</td>
                             }
                             return null
                           })}

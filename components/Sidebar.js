@@ -15,7 +15,7 @@ function claveGrupo(nombre) {
   return nombreBase(nombre).toLowerCase()
 }
 
-function SidebarInner({ mobileOpen, onMobileClose }) {
+function SidebarInner({ mobileOpen, onMobileClose, theme, onToggleTheme }) {
   const pathname      = usePathname()
   const searchParams  = useSearchParams()
   const router        = useRouter()
@@ -292,7 +292,6 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
 
   const navFijo = [
     { href: '/', icon: '📊', label: 'Dashboard General' },
-    { href: '/gantt', icon: '📅', label: 'Gantt General' },
     { href: '/reportes', icon: '📋', label: 'Reportes' },
   ]
   const navConfig = [
@@ -305,73 +304,134 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
   const sidebarContent = (
     <aside
       ref={asideRef}
-      className="flex flex-col h-full border-r border-gray-800 transition-all duration-200 overflow-y-auto"
-      style={{ width: collapsed ? 52 : 230, background: '#0f172a' }}
+      className="flex flex-col h-full transition-all duration-200 overflow-y-auto"
+      style={{ width: collapsed ? 54 : 230, background: '#0d1117', borderRight: '1px solid #21303f', flexShrink: 0 }}
     >
-      {/* Logo */}
-      <div className="flex items-center gap-3 p-3 border-b border-gray-800 sticky top-0 z-10" style={{background:'#0f172a'}}>
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-          style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
-          📋
-        </div>
-        {!collapsed && (
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-white truncate">SeguiTrack</div>
-            <div className="text-xs text-gray-500 truncate">Sistema de Seguimiento</div>
+      {/* Logo Electro Puno */}
+      <div className="sticky top-0 z-10" style={{background:'#0d1117', borderBottom:'1px solid #21303f'}}>
+        <div className="flex items-center gap-2 p-3">
+          <div style={{
+            width: collapsed ? 36 : 36, height: 36, borderRadius: 8, overflow: 'hidden',
+            flexShrink: 0, background: '#fff', display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
+            <img src="/logo_electropuno.jpg" alt="Electro Puno" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6 }} />
           </div>
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <div style={{fontSize:12, fontWeight:700, color:'#ffffff', letterSpacing:'0.01em', lineHeight:1.2}}>SeguiTrack</div>
+              <div style={{fontSize:9.5, color:'rgba(255,255,255,0.45)', letterSpacing:'0.06em', textTransform:'uppercase', marginTop:1}}>Electro Puno · DGCM</div>
+            </div>
+          )}
+          <div className="flex flex-col gap-1 flex-shrink-0">
+            <button onClick={() => setCollapsed(!collapsed)}
+              className="hidden md:flex w-6 h-6 items-center justify-center rounded transition-all"
+              style={{color:'rgba(255,255,255,0.3)', fontSize:14, background:'rgba(255,255,255,0.06)'}}
+              onMouseEnter={e=>e.currentTarget.style.color='rgba(255,255,255,0.8)'}
+              onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>
+              {collapsed ? '›' : '‹'}
+            </button>
+            {onMobileClose && (
+              <button onClick={onMobileClose}
+                className="flex md:hidden w-6 h-6 items-center justify-center"
+                style={{color:'rgba(255,255,255,0.5)', fontSize:16}}>✕</button>
+            )}
+          </div>
+        </div>
+        {/* Toggle día/noche */}
+        {!collapsed && (
+          <button onClick={onToggleTheme} style={{
+            width:'calc(100% - 16px)', margin:'0 8px 10px',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'6px 10px', borderRadius:8, cursor:'pointer',
+            background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)',
+            color:'rgba(255,255,255,0.65)', fontSize:11, transition:'all 0.15s',
+          }}
+          onMouseEnter={e=>{ e.currentTarget.style.background='rgba(255,255,255,0.12)'; e.currentTarget.style.color='#fff' }}
+          onMouseLeave={e=>{ e.currentTarget.style.background='rgba(255,255,255,0.07)'; e.currentTarget.style.color='rgba(255,255,255,0.65)' }}>
+            <span>{theme === 'dark' ? '🌙 Modo oscuro' : '☀️ Modo claro'}</span>
+            <div style={{
+              width:30, height:17, borderRadius:10,
+              background: theme === 'dark' ? 'rgba(255,255,255,0.15)' : '#fbbf24',
+              position:'relative', transition:'background 0.2s', flexShrink:0,
+            }}>
+              <div style={{
+                position:'absolute', top:2,
+                left: theme === 'dark' ? 2 : 13,
+                width:13, height:13, borderRadius:'50%',
+                background:'#fff', transition:'left 0.2s',
+                boxShadow:'0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </div>
+          </button>
         )}
-        <button onClick={() => setCollapsed(!collapsed)}
-          className="hidden md:flex text-gray-600 hover:text-gray-400 text-xs flex-shrink-0 w-6 h-6 items-center justify-center rounded hover:bg-gray-800">
-          {collapsed ? '→' : '←'}
-        </button>
-        {onMobileClose && (
-          <button onClick={onMobileClose}
-            className="flex md:hidden text-gray-500 hover:text-gray-300 flex-shrink-0 w-7 h-7 items-center justify-center rounded hover:bg-gray-800 text-lg">
-            ✕
+        {collapsed && (
+          <button onClick={onToggleTheme} style={{
+            width:'calc(100% - 12px)', margin:'0 6px 8px',
+            padding:'6px', borderRadius:7, cursor:'pointer',
+            background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)',
+            fontSize:14, textAlign:'center', transition:'all 0.15s',
+          }}
+          onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.14)'}
+          onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.07)'}>
+            {theme === 'dark' ? '🌙' : '☀️'}
           </button>
         )}
       </div>
 
       {/* Nav fijo */}
       <div className="p-2">
-        {navFijo.map(item => (
-          <Link key={item.href} href={item.href}>
-            <div ref={isActive(item.href) && !pathname.startsWith('/modulo') ? activeRef : null}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-1 cursor-pointer transition-all
-              ${isActive(item.href) && !pathname.startsWith('/modulo')
-                ? 'bg-blue-950 text-blue-400 border border-blue-900'
-                : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}>
-              <span className="text-base flex-shrink-0">{item.icon}</span>
-              {!collapsed && <span className="font-medium truncate text-xs">{item.label}</span>}
-            </div>
-          </Link>
-        ))}
+        {navFijo.map(item => {
+          const act = isActive(item.href) && !pathname.startsWith('/modulo')
+          return (
+            <Link key={item.href} href={item.href}>
+              <div ref={act ? activeRef : null}
+                style={{
+                  display:'flex', alignItems:'center', gap:10,
+                  padding:'7px 10px', borderRadius:7, marginBottom:2, cursor:'pointer',
+                  transition:'all 0.15s',
+                  borderLeft: `3px solid ${act ? '#58d5c9' : 'transparent'}`,
+                  background: act ? 'rgba(88,213,201,0.08)' : 'transparent',
+                  color: act ? '#58d5c9' : 'rgba(255,255,255,0.85)',
+                  paddingLeft: act ? 8 : 10,
+                }}
+                onMouseEnter={e=>{ if(!act){ e.currentTarget.style.background='rgba(167,139,250,0.1)'; e.currentTarget.style.color='#a78bfa' }}}
+                onMouseLeave={e=>{ if(!act){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='rgba(255,255,255,0.85)' }}}>
+                <span className="text-base flex-shrink-0">{item.icon}</span>
+                {!collapsed && <span style={{fontWeight:act?600:400, fontSize:12, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{item.label}</span>}
+              </div>
+            </Link>
+          )
+        })}
       </div>
 
       {/* Módulos */}
       <div className="px-2 flex-1">
         {!collapsed && (
-          <div className="text-xs font-bold text-gray-600 uppercase tracking-wider px-3 py-2">Módulos</div>
+          <div style={{fontSize:9.5, fontWeight:700, color:'rgba(255,255,255,0.4)', textTransform:'uppercase', letterSpacing:'0.08em', padding:'10px 10px 4px'}}>Módulos</div>
         )}
 
         {/* Módulos anuales (tipo=inst) — sección fija, sin grupo de período */}
         {modulos.filter(m => m.tipo === 'inst').map(mod => {
           const activo = pathname === `/modulo-inst/${mod.id}`
+          const c = mod.color || '#0ea5e9'
           return (
             <Link key={mod.id} href={`/modulo-inst/${mod.id}`}>
-              <div
-                ref={activo ? activeRef : null}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer transition-all
-                  ${activo ? 'text-white border' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
-                style={activo
-                  ? { background: `${mod.color}20`, borderColor: `${mod.color}40`, color: mod.color }
-                  : {}}
-              >
+              <div ref={activo ? activeRef : null} style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'7px 10px', borderRadius:7, marginBottom:2, cursor:'pointer',
+                transition:'all 0.15s',
+                borderLeft: `3px solid ${activo ? c : 'transparent'}`,
+                background: activo ? `${c}18` : 'transparent',
+                color: activo ? c : 'rgba(255,255,255,0.85)',
+                paddingLeft: activo ? 8 : 10,
+              }}
+              onMouseEnter={e=>{ if(!activo){ e.currentTarget.style.background=`${c}12`; e.currentTarget.style.color=c }}}
+              onMouseLeave={e=>{ if(!activo){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='rgba(255,255,255,0.85)' }}}>
                 <span className="text-base flex-shrink-0">{mod.icono || '📋'}</span>
                 {!collapsed && (
                   <div className="flex-1 min-w-0">
-                    <span className="font-medium truncate text-xs block">{mod.nombre}</span>
-                    <span className="text-xs opacity-40">{mod.periodo}</span>
+                    <span style={{fontWeight:activo?600:400, fontSize:12, display:'block', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{mod.nombre}</span>
+                    <span style={{fontSize:10, opacity:0.4}}>{mod.anio}</span>
                   </div>
                 )}
               </div>
@@ -388,41 +448,49 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
 
           return (
             <div key={p} className="mb-1">
-              <button
-                onClick={() => togglePeriodo(p)}
-                className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all text-left
-                  ${tieneActivo ? 'text-blue-400' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-              >
+              <button onClick={() => togglePeriodo(p)} style={{
+                width:'100%', display:'flex', alignItems:'center', gap:8,
+                padding:'6px 10px', borderRadius:6, background:'transparent', border:'none',
+                color: tieneActivo ? '#58d5c9' : 'rgba(255,255,255,0.5)', cursor:'pointer', textAlign:'left',
+                fontSize:10, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase',
+                transition:'color 0.15s',
+              }}
+              onMouseEnter={e=>{ if(!tieneActivo) e.currentTarget.style.color='rgba(255,255,255,0.8)' }}
+              onMouseLeave={e=>{ if(!tieneActivo) e.currentTarget.style.color='rgba(255,255,255,0.5)' }}>
                 {!collapsed ? (
                   <>
-                    <span className="text-xs font-bold tracking-wide flex-1">{p}</span>
-                    <div
-                      onClick={e => { e.stopPropagation(); eliminarPeriodo(p) }}
-                      className="text-gray-700 hover:text-red-400 transition-colors mr-1 text-xs cursor-pointer"
-                      title="Eliminar período"
-                    >✕</div>
-                    <span className="text-xs opacity-50">{abierto ? '▾' : '▸'}</span>
+                    <span style={{flex:1}}>{p}</span>
+                    <div onClick={e => { e.stopPropagation(); eliminarPeriodo(p) }}
+                      style={{color:'rgba(255,255,255,0.2)', fontSize:10, cursor:'pointer', marginRight:4, transition:'color 0.15s'}}
+                      onMouseEnter={e=>e.currentTarget.style.color='#f87171'}
+                      onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.2)'}
+                      title="Eliminar período">✕</div>
+                    <span style={{opacity:0.5}}>{abierto ? '▾' : '▸'}</span>
                   </>
                 ) : (
-                  <span className="text-xs font-bold">{p.slice(-1)}</span>
+                  <span>{p.slice(-1)}</span>
                 )}
               </button>
 
               {(abierto || collapsed) && modulosPeriodo.map(mod => {
                 const activo = isModuloActivo(mod.id, p)
+                const c = mod.color || '#0ea5e9'
                 return (
                   <Link key={mod.id} href={`/modulo/${mod.id}?periodo=${p}`}>
-                    <div
-                      ref={activo ? activeRef : null}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer transition-all
-                        ${!collapsed ? 'ml-2' : ''}
-                        ${activo ? 'text-white border' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}`}
-                      style={activo
-                        ? { background: `${mod.color}20`, borderColor: `${mod.color}40`, color: mod.color }
-                        : {}}
-                    >
+                    <div ref={activo ? activeRef : null} style={{
+                      display:'flex', alignItems:'center', gap:10,
+                      padding:'7px 10px', borderRadius:7, marginBottom:2, cursor:'pointer',
+                      transition:'all 0.15s',
+                      marginLeft: collapsed ? 0 : 8,
+                      borderLeft: `3px solid ${activo ? c : 'transparent'}`,
+                      background: activo ? `${c}18` : 'transparent',
+                      color: activo ? c : 'rgba(255,255,255,0.85)',
+                      paddingLeft: activo ? 8 : 10,
+                    }}
+                    onMouseEnter={e=>{ if(!activo){ e.currentTarget.style.background=`${c}12`; e.currentTarget.style.color=c }}}
+                    onMouseLeave={e=>{ if(!activo){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='rgba(255,255,255,0.85)' }}}>
                       <span className="text-base flex-shrink-0">{mod.icono || '📋'}</span>
-                      {!collapsed && <span className="font-medium truncate text-xs">{mod.nombre}</span>}
+                      {!collapsed && <span style={{fontWeight:activo?600:400, fontSize:12, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{mod.nombre}</span>}
                     </div>
                   </Link>
                 )
@@ -431,9 +499,17 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
               {/* Crear módulo dentro del período */}
               {(abierto || collapsed) && (
                 <Link href={`/configuracion/modulos/nuevo?periodo=${p}`}>
-                  <div className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 cursor-pointer text-gray-600 hover:text-blue-400 border border-dashed border-gray-800 hover:border-blue-800 transition-all ${!collapsed ? 'ml-2' : ''}`}>
+                  <div style={{
+                    display:'flex', alignItems:'center', gap:10,
+                    padding:'6px 10px', borderRadius:7, marginBottom:2, cursor:'pointer',
+                    marginLeft: collapsed ? 0 : 8,
+                    border:'1px dashed rgba(255,255,255,0.15)', color:'rgba(255,255,255,0.3)', fontSize:12,
+                    transition:'all 0.15s',
+                  }}
+                  onMouseEnter={e=>{ e.currentTarget.style.borderColor='rgba(255,255,255,0.4)'; e.currentTarget.style.color='rgba(255,255,255,0.8)' }}
+                  onMouseLeave={e=>{ e.currentTarget.style.borderColor='rgba(255,255,255,0.15)'; e.currentTarget.style.color='rgba(255,255,255,0.3)' }}>
                     <span className="text-base flex-shrink-0">➕</span>
-                    {!collapsed && <span className="text-xs">Crear módulo</span>}
+                    {!collapsed && <span style={{fontSize:11}}>Crear módulo</span>}
                   </div>
                 </Link>
               )}
@@ -450,28 +526,46 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
             setModulosSeleccionados(modulosUnicos.map(m => m.id))
             setModalNuevoPeriodo(true)
           }}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer text-gray-600 hover:text-blue-400 border border-dashed border-gray-800 hover:border-blue-800 transition-all mt-1"
+          style={{
+            width:'100%', display:'flex', alignItems:'center', gap:10,
+            padding:'7px 10px', borderRadius:7, border:'1px dashed #162540',
+            background:'transparent', color:'#2d4a6e', cursor:'pointer',
+            fontSize:11, marginTop:4, transition:'all 0.15s',
+          }}
+          onMouseEnter={e=>{ e.currentTarget.style.borderColor='#0ea5e9'; e.currentTarget.style.color='#38bdf8' }}
+          onMouseLeave={e=>{ e.currentTarget.style.borderColor='#162540'; e.currentTarget.style.color='#2d4a6e' }}
         >
           <span className="text-base flex-shrink-0">📅</span>
-          {!collapsed && <span className="text-xs">Nuevo período</span>}
+          {!collapsed && <span>Nuevo período</span>}
         </button>
 
 
       </div>
 
       {/* Sistema */}
-      <div className="p-2 border-t border-gray-800">
-        {!collapsed && <div className="text-xs font-bold text-gray-600 uppercase tracking-wider px-3 py-2">Sistema</div>}
-        {navConfig.map(item => (
-          <Link key={item.href} href={item.href}>
-            <div ref={isActive(item.href) ? activeRef : null}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-1 cursor-pointer transition-all text-xs
-              ${isActive(item.href) ? 'bg-blue-950 text-blue-400' : 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'}`}>
-              <span className="text-sm flex-shrink-0">{item.icon}</span>
-              {!collapsed && <span className="truncate">{item.label}</span>}
-            </div>
-          </Link>
-        ))}
+      <div className="p-2" style={{borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+        {!collapsed && <div style={{fontSize:9.5, fontWeight:700, color:'rgba(255,255,255,0.4)', textTransform:'uppercase', letterSpacing:'0.08em', padding:'6px 10px 4px'}}>Sistema</div>}
+        {navConfig.map(item => {
+          const act = isActive(item.href)
+          return (
+            <Link key={item.href} href={item.href}>
+              <div ref={act ? activeRef : null} style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'7px 10px', borderRadius:7, marginBottom:2, cursor:'pointer',
+                transition:'all 0.15s',
+                borderLeft: `3px solid ${act ? '#7ec8f8' : 'transparent'}`,
+                background: act ? 'rgba(126,200,248,0.13)' : 'transparent',
+                color: act ? '#ffffff' : 'rgba(255,255,255,0.45)',
+                paddingLeft: act ? 7 : 10,
+              }}
+              onMouseEnter={e=>{ if(!act){ e.currentTarget.style.background='rgba(255,255,255,0.09)'; e.currentTarget.style.color='rgba(255,255,255,0.85)' }}}
+              onMouseLeave={e=>{ if(!act){ e.currentTarget.style.background='transparent'; e.currentTarget.style.color='rgba(255,255,255,0.85)' }}}>
+                <span style={{fontSize:14, flexShrink:0}}>{item.icon}</span>
+                {!collapsed && <span style={{fontSize:12, fontWeight:act?600:400, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{item.label}</span>}
+              </div>
+            </Link>
+          )
+        })}
       </div>
     </aside>
   )
@@ -494,7 +588,7 @@ function SidebarInner({ mobileOpen, onMobileClose }) {
       {/* Modal nuevo período */}
       {modalNuevoPeriodo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="rounded-xl p-6 shadow-xl" style={{background:'#0f172a', border:'1px solid #1e293b', width: 340}}>
+          <div className="rounded-xl p-6 shadow-xl" style={{background:'#0a1628', border:'1px solid #1a3050', width: 340}}>
             <div className="text-sm font-bold text-white mb-1">Nuevo período</div>
             <div className="text-xs text-gray-500 mb-3">Ej: 2026-II, 2027-I, 2027-II</div>
 

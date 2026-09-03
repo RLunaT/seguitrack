@@ -149,7 +149,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       const fact = par.find(o => o.actividad === act1) || par[0]
       const inst = par.find(o => o.actividad === act2)
       setForm({
-        numero_ot:          String(fact.numero_ot || ''),
+        numero_ot:          String(fact.numero_ot || '').padStart(2, '0'),
         contratista_id:     String(fact.contratista_id || ''),
         contrato:           fact.contrato || '',
         fecha_entrega:      fact.datos_extra?.doc_fecha_entrega || '',
@@ -272,10 +272,10 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
         const instId = par.find(o => o.actividad === act2)?.id
         if (factId) await supabase.from('ots').update(otFact).eq('id', factId)
         if (instId) await supabase.from('ots').update(otInst).eq('id', instId)
-        if (!instId && form.cant_inst) await supabase.from('ots').insert(otInst)
+        if (!instId) await supabase.from('ots').insert(otInst)
         onSaved()
       } else {
-        const inserts = [otFact, ...(form.cant_inst ? [otInst] : [])]
+        const inserts = [otFact, otInst]
         const { data: inserted } = await supabase.from('ots').insert(inserts).select()
         const fact = inserted?.find(o => o.actividad === act1)
         const inst = inserted?.find(o => o.actividad === act2)
@@ -303,7 +303,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
     const inst = otGuardada?.inst
     if (!fact) return
     const vars = {
-      numero_ot:          String(fact.numero_ot || ''),
+      numero_ot:          String(fact.numero_ot || '').padStart(2, '0'),
       contrato:           (fact.contrato || '').replace(/^contrato\s+/i,'').trim(),
       fecha_entrega:      (() => {
         const fe = fact.datos_extra?.doc_fecha_entrega
@@ -322,15 +322,16 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       firma_area_usuaria: docFields.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   docFields.firma_supervisor || 'SUPERVISOR "Consorcio San Pedro - ITEM 4"',
       nombre_contratista: contNombre,
+      fi_fact:      fmtTabla(fact.fecha_inicio),
       ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
       fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
-      cant_fact:    String(fact.cantidad_programada || ''),
-      fi_inst:      fmtTabla(inst?.fecha_inicio),
-      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos),
-      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes),
-      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
-      cant_inst:    String(inst?.cantidad_programada || ''),
+      cant_fact:    String(fact.cantidad_programada ?? '0'),
+      fi_inst:      fmtTabla(inst?.fecha_inicio)              || '---',
+      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos)        || '---',
+      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes)  || '---',
+      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos) || '---',
+      cant_inst:    String(inst?.cantidad_programada ?? '0'),
     }
     const esReubicacion = act2 === 'ejecucion'
     const template = esReubicacion
@@ -349,7 +350,13 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioActivo || ''}.${pdf ? 'pdf' : 'docx'}`
+      const esReubMod = act2 === 'ejecucion'
+      const itemMatchMod = contNombre.match(/[ÍI]tem\s*(\d+)/i)
+      const itemNumMod   = itemMatchMod ? itemMatchMod[1] : ''
+      const filenameMod  = esReubMod
+        ? `OT N° ${vars.numero_ot} Ítem ${itemNumMod} Reubicación, Normalización de suministros ${anioActivo || ''} Contrato ${vars.contrato}.${pdf ? 'pdf' : 'docx'}`
+        : `OT-${String(vars.numero_ot).padStart(2,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioActivo || ''}.${pdf ? 'pdf' : 'docx'}`
+      a.href = url; a.download = filenameMod
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       const okStatus = pdf ? 'pdf-ok' : 'word-ok'

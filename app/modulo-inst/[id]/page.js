@@ -61,6 +61,33 @@ const CAMPOS_BASE = [
   { key: 'observaciones',      label: 'Observaciones',   always: false },
 ]
 
+function CheckBox({ checked, onChange }) {
+  return (
+    <div
+      onClick={onChange}
+      style={{
+        width: 18, height: 18,
+        background: checked ? '#3b82f6' : 'transparent',
+        border: `2px solid ${checked ? '#3b82f6' : '#4b5563'}`,
+        borderRadius: 4,
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.15s',
+        flexShrink: 0,
+        margin: '0 auto',
+      }}
+    >
+      {checked && (
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+          <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      )}
+    </div>
+  )
+}
+
 export default function ModuloPage() {
   const { id } = useParams()
   const searchParams = useSearchParams()
@@ -231,7 +258,8 @@ export default function ModuloPage() {
   const act1 = _actividades[0] || 'factibilidades'
   const act2 = _actividades[1] || 'instalaciones'
   function idPrincipal(reg) {
-    return esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
+    const n = esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
+    return esOT ? String(n).padStart(2, '0') : n
   }
   function labelId() { return esOT ? 'N° OT' : 'N° Registro' }
 
@@ -509,7 +537,8 @@ export default function ModuloPage() {
     // Buscar el par completo de actividades para esta OT
     const numeroOt = ot.numero_ot
     const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2)
+    // Si no existe el registro de ejecución (OT creada antes del fix), usar fact como fallback
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2) || fact
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -538,9 +567,8 @@ export default function ModuloPage() {
     const firmaSupDefault = contNombre.toLowerCase().includes('san pedro')
       ? 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
       : contNombre ? `SUPERVISOR "${contNombre}"` : 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
-
     const vars = {
-      numero_ot:          String(numeroOt || ''),
+      numero_ot:          String(numeroOt || '').padStart(2, '0'),
       contrato:           (ot.contrato || contWord?.contrato || '').replace(/^contrato\s+/i,'').trim(),
       fecha_entrega:      (() => {
         const fe = fact.datos_extra?.doc_fecha_entrega
@@ -558,16 +586,17 @@ export default function ModuloPage() {
       firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupDefault,
       nombre_contratista: contNombre,
+      fi_fact:      fmtTabla(fact.fecha_inicio),
       ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
       fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
-      cant_fact:    String(fact.cantidad_programada || ''),
+      cant_fact:    String(fact.cantidad_programada ?? '0'),
       detalle_fact: fact.datos_extra?.detalle_fact || 'Adjunto listado OT por correo electrónico',
-      fi_inst:      fmtTabla(inst?.fecha_inicio),
-      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos),
-      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes),
-      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
-      cant_inst:    String(inst?.cantidad_programada || ''),
+      fi_inst:      fmtTabla(inst?.fecha_inicio)              || '---',
+      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos)        || '---',
+      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes)  || '---',
+      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos) || '---',
+      cant_inst:    String(inst?.cantidad_programada ?? '0'),
       detalle_inst: inst?.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico',
     }
 
@@ -590,7 +619,13 @@ export default function ModuloPage() {
       const disposition = res.headers.get('Content-Disposition') || ''
       const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
       const m = disposition.match(/filename="([^"]+)"/)
-      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.docx`)
+      const itemMatchW = contNombre.match(/[ÍI]tem\s*(\d+)/i)
+      const itemNumW   = itemMatchW ? itemMatchW[1] : ''
+      const baseNameW  = esReubicacion
+        ? `OT N° ${vars.numero_ot} Ítem ${itemNumW} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
+        : `OT-${String(vars.numero_ot).padStart(2,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}`
+      // Para reubicación usamos siempre nuestro nombre; para otros módulos usamos el del servidor
+      const filename = esReubicacion ? `${baseNameW}.docx` : (mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `${baseNameW}.docx`))
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = filename
@@ -605,7 +640,8 @@ export default function ModuloPage() {
   async function generarPdfDirecto(ot) {
     const numeroOt = ot.numero_ot
     const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2)
+    // Si no existe el registro de ejecución (OT creada antes del fix), usar fact como fallback
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2) || fact
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -626,12 +662,11 @@ export default function ModuloPage() {
       : contNombrePdf ? `SUPERVISOR "${contNombrePdf}"` : 'SUPERVISOR "Consorcio San Pedro - ITEM 4"'
 
     const vars = {
-      numero_ot:          String(numeroOt||''),
+      numero_ot:          String(numeroOt||'').padStart(2,'0'),
       contrato:           (ot.contrato||contPdf?.contrato||'').replace(/^contrato\s+/i,'').trim(),
       fecha_entrega:      (() => {
         const fe = fact.datos_extra?.doc_fecha_entrega
         if (fe) return fmtEntrega(fe)
-        // Fallback: fecha_inicio - 1 día (entrega = inicio - 1 según fórmula Excel)
         if (fact.fecha_inicio) {
           const d = new Date(fact.fecha_inicio + 'T00:00:00'); d.setDate(d.getDate() - 1)
           return fmtEntrega(d.toISOString().slice(0,10))
@@ -644,11 +679,17 @@ export default function ModuloPage() {
       firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupPdf,
       nombre_contratista: contNombrePdf,
-      fi_fact: fmtTabla(fact.fecha_inicio), ff_fact: fmtTabla(fact.fecha_fin_trabajos), fl_fact: fmtTabla(fact.fecha_limite_expedientes),
-      plazo_fact: diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos), cant_fact: String(fact.cantidad_programada||''),
+      fi_fact:      fmtTabla(fact.fecha_inicio),
+      ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
+      fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
+      plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
+      cant_fact:    String(fact.cantidad_programada ?? '0'),
       detalle_fact: fact.datos_extra?.detalle_fact||'Adjunto listado OT por correo electrónico',
-      fi_inst: fmtTabla(inst?.fecha_inicio), ff_inst: fmtTabla(inst?.fecha_fin_trabajos), fl_inst: fmtTabla(inst?.fecha_limite_expedientes),
-      plazo_inst: diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos), cant_inst: String(inst?.cantidad_programada||''),
+      fi_inst:      fmtTabla(inst?.fecha_inicio)              || '---',
+      ff_inst:      fmtTabla(inst?.fecha_fin_trabajos)        || '---',
+      fl_inst:      fmtTabla(inst?.fecha_limite_expedientes)  || '---',
+      plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos) || '---',
+      cant_inst:    String(inst?.cantidad_programada ?? '0'),
       detalle_inst: inst?.datos_extra?.detalle_inst||'Adjunto listado OT por correo electrónico',
     }
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
@@ -667,7 +708,12 @@ export default function ModuloPage() {
       const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.pdf`
+      const itemMatchP  = contNombrePdf.match(/[ÍI]tem\s*(\d+)/i)
+      const itemNumP    = itemMatchP ? itemMatchP[1] : ''
+      const filenamePdf = esReubicacion
+        ? `OT N° ${vars.numero_ot} Ítem ${itemNumP} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}.pdf`
+        : `OT-${vars.numero_ot} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.pdf`
+      a.href = url; a.download = filenamePdf
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       mostrarToast('pdf-ok', 'ok')
@@ -1011,18 +1057,33 @@ export default function ModuloPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-6 border-b border-gray-800">
+      <div style={{ display:'flex', gap:6, padding:'10px 24px', borderBottom:'1px solid var(--border)', background:'var(--surface)' }}>
         {[
-          { key: 'tabla', label: '📋 Listado' },
-          { key: 'gantt', label: '📅 Gantt' },
-          { key: 'campos', label: '⚙️ Campos' },
-          { key: 'feriados', label: '🗓 Feriados y capacidad' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-xs font-medium rounded-t-lg border-b-2 transition-all ${tab === t.key ? 'border-blue-500 text-blue-400 bg-blue-950' : 'border-transparent text-gray-500 hover:text-gray-300'}`}>
-            {t.label}
-          </button>
-        ))}
+          { key: 'tabla',    icon: '📋', label: 'Listado',             color: '#58d5c9' },
+          { key: 'gantt',    icon: '📅', label: 'Gantt',               color: '#a78bfa' },
+          { key: 'campos',   icon: '⚙️', label: 'Campos',              color: '#fbbf24' },
+          { key: 'feriados', icon: '🗓', label: 'Feriados y capacidad', color: '#f87171' },
+        ].map(t => {
+          const active = tab === t.key
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              onMouseEnter={e => { if(!active) e.currentTarget.style.opacity='0.8' }}
+              onMouseLeave={e => { if(!active) e.currentTarget.style.opacity='1' }}
+              style={{
+                display:'flex', alignItems:'center', gap:7,
+                padding:'6px 16px', borderRadius:7,
+                background: active ? t.color : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${active ? t.color : 'var(--border)'}`,
+                color: active ? '#0d1117' : t.color,
+                fontWeight: active ? 700 : 500,
+                fontSize:12,
+                cursor:'pointer', transition:'all 0.15s', whiteSpace:'nowrap',
+              }}>
+              <span style={{fontSize:14}}>{t.icon}</span>
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-4">
@@ -1082,9 +1143,9 @@ export default function ModuloPage() {
                     onClick={()=>{setColumnFilters({});setFiltContratista('');setFiltEstado('');setBuscar('')}}>✕</button>
                 )}
                 <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs text-gray-500">{otsFiltradas.length}/{ots.length} registros</span>
+                  <span className="text-xs text-gray-500">{new Set(otsFiltradas.map(o=>o.numero_ot)).size}/{new Set(ots.map(o=>o.numero_ot)).size} OTs</span>
                   {!modoEliminar ? (
-                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>setModoEliminar(true)}>🗑️ Eliminar</button>
+                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{ setModoEliminar(true); setTimeout(()=>{ const el=tablaRef.current; if(!el) return; el.scrollTo({top:0,left:0,behavior:'smooth'}); const parent=el.parentElement; if(parent){ const rect=parent.getBoundingClientRect(); window.scrollTo({top:window.scrollY+rect.top-72,behavior:'smooth'}) } },80) }}>🗑️ Eliminar</button>
                   ) : (
                     <div className="flex gap-1 items-center">
                       <button className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400" onClick={seleccionarTodas}>{seleccionados.size===otsFiltradas.length?'☐ Ninguna':'✅ Todas'}</button>
@@ -1114,14 +1175,14 @@ export default function ModuloPage() {
                   </colgroup>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: '#0f172a' }}>
                     <tr>
-                      {modoEliminar && <th className="w-8"><input type="checkbox" className="accent-blue-500" checked={seleccionados.size===otsFiltradas.length && otsFiltradas.length>0} onChange={seleccionarTodas} /></th>}
+                      {modoEliminar && <th className="w-8" style={{textAlign:'center'}}><CheckBox checked={seleccionados.size===otsFiltradas.length && otsFiltradas.length>0} onChange={seleccionarTodas} /></th>}
                       {todasColsOrdenadas.map(col => {
                         const w = colWidths[col.key] || defaultColW(col.key)
                         if (col.key === 'numero_registro') return <th key="nr" style={{minWidth:90,width:90,padding:'4px 8px',textAlign:'center',fontSize:'0.7rem',color:'#6b7280',background:'#0f172a',position:'sticky',left:0,zIndex:2,borderRight:'2px solid #1e293b',position:'relative'}}>N° OT<span className="col-resize-handle" onMouseDown={e=>{e.stopPropagation();startResize(e,'numero_registro',w)}}/></th>
                         if (col.key === 'numero_ot') return <SortTh key="not" k="numero_ot" label={labelId()} sc={sortCfg} ts={toggleSort} onResize={e => startResize(e, col.key, w)} />
                         // Doc y Acciones: sin handle de resize — ancho fijo siempre,
                         // para que los botones nunca queden tapados.
-                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative',borderLeft:'2px solid #1e3a5f',background:'#0d1e36',color:'#60a5fa'}}>Acciones</th>
+                        if (col.key === 'acciones') return <th key="acc" style={{position:'relative',borderLeft:'2px solid #1e3a5f',background:'#0d1e36',color:'#60a5fa',width:60,minWidth:60,textAlign:'center'}}>Acciones</th>
                         if (col.key === 'inst_seguim') return null
                         if (col.key === 'inst_doc') return null
                         if (col.key === 'inst_editar') return null
@@ -1170,7 +1231,7 @@ export default function ModuloPage() {
                           const rowBorder = esLast ? '2px solid #1e3a5f' : 'none'
                           return (
                             <tr key={`${gi}-${ot.id}`} className={!esLast ? 'ot-mid-row' : ''}>
-                              {modoEliminar && esFirst && celdaSpan(<input type="checkbox" className="accent-blue-500" checked={seleccionados.has(ref.id)} onChange={() => {
+                              {modoEliminar && esFirst && celdaSpan(<CheckBox checked={seleccionados.has(ref.id)} onChange={() => {
                                 setSeleccionados(prev => {
                                   const next = new Set(prev)
                                   const ids = [fact?.id, inst?.id].filter(Boolean)
@@ -1193,8 +1254,7 @@ export default function ModuloPage() {
                                 if (k === 'inst_editar') return null
                                 if (k === 'acciones') {
                                   if (!esFirst) return null
-                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',padding:'4px 8px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:90,minWidth:90}}><div className="flex gap-1">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact||inst)} onPdf={()=>generarPdfDirecto(fact||inst)}/><button className="btn-ghost text-xs py-1 px-2" title="Seguimiento" onClick={()=>{setOtSeg({fact, inst}); setModalSegInst(true)}} style={{color:'#60a5fa',borderColor:'#1e3a5f'}}>📊</button></>:<button className={`text-xs py-1 px-2 rounded ${seleccionados.has(ref.id)?'text-red-400':'text-gray-600'}`} onClick={()=>{
-                    // Seleccionar/deseleccionar fact e inst juntos
+                                  return <td key="acc" rowSpan={rowSpan} style={{verticalAlign:'middle',textAlign:'center',padding:'4px 6px',borderLeft:'2px solid #1e3a5f',background:'#0a1628',width:60,minWidth:60}}><div className="flex gap-1 justify-center items-center">{!modoEliminar?<><BotonDocumento onWord={()=>generarWordDirecto(fact||inst)} onPdf={()=>generarPdfDirecto(fact||inst)}/><button className="btn-ghost text-xs py-1 px-2" title="Editar" onClick={()=>{setEditando(ref);setModalOpen(true)}}>✏️</button></>:<CheckBox checked={seleccionados.has(ref.id)} onChange={()=>{
                     setSeleccionados(prev => {
                       const next = new Set(prev)
                       const ids = [fact?.id, inst?.id].filter(Boolean)
@@ -1202,7 +1262,7 @@ export default function ModuloPage() {
                       else ids.forEach(id => next.add(id))
                       return next
                     })
-                  }}>{seleccionados.has(ref.id)?'☑':'☐'}</button>}</div></td>
+                  }} />}</div></td>
                                 }
                                 if (k === 'actividad') {
                                   const esAct2 = ot.actividad === act2
@@ -1220,8 +1280,37 @@ export default function ModuloPage() {
                                   const prog = ot.cantidad_programada > 0 && ot.cantidad_entregada !== null ? Math.round(ot.cantidad_entregada / ot.cantidad_programada * 100) : null
                                   return <td key={k} className="text-center text-xs"><span>{ot.cantidad_entregada??'—'}</span>{prog!==null&&<span className="ml-1 text-xs font-mono" style={{color:prog>=100?'#22c55e':prog>=80?'#eab308':'#ef4444'}}>({prog}%)</span>}</td>
                                 }
-                                if (k === 'fecha_reporte') return <td key={k} className="font-mono text-xs" style={{color:{1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'}}>{fmtFecha(ot.fecha_reporte)}</td>
-                                if (k === 'estado') return <td key={k}><span style={{color:{1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280',fontSize:'11px',fontWeight:600,whiteSpace:'nowrap'}}>{info.label}</span></td>
+                                if (k === 'fecha_reporte') {
+                                  const colorEstado = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
+                                  return (
+                                    <td key={k} style={{padding:'2px 8px'}}>
+                                      <button
+                                        onClick={() => { setOtSeg(ot); setModalSeg(true) }}
+                                        title="Registrar seguimiento"
+                                        style={{display:'inline-flex',alignItems:'center',gap:5,background:'transparent',border:'none',cursor:'pointer',padding:'2px 4px',borderRadius:4,transition:'opacity 0.15s'}}
+                                        onMouseEnter={e => e.currentTarget.style.opacity='0.7'}
+                                        onMouseLeave={e => e.currentTarget.style.opacity='1'}
+                                      >
+                                        {ot.fecha_reporte ? (
+                                          <>
+                                            <span className="font-mono text-xs" style={{color:colorEstado}}>{fmtFecha(ot.fecha_reporte)}</span>
+                                            <span style={{width:5,height:5,borderRadius:'50%',background:'#475569',flexShrink:0,display:'inline-block'}}/>
+                                          </>
+                                        ) : (
+                                          <span style={{display:'inline-flex',alignItems:'center',gap:4,background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.28)',borderRadius:999,padding:'2px 9px 2px 7px',color:'#60a5fa',fontSize:10,fontWeight:500,whiteSpace:'nowrap'}}>
+                                            <span style={{fontSize:12}}>👀</span>Reportar
+                                          </span>
+                                        )}
+                                      </button>
+                                    </td>
+                                  )
+                                }
+                                if (k === 'estado') {
+                                  const colorEst = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
+                                  const emojiEst = ot.estado===1?'🥳':ot.estado===2&&ot.fecha_reporte?'👎':null
+                                  const labelTxt = emojiEst ? info.label.replace(/^\S+\s*/,'') : info.label
+                                  return <td key={k}><span style={{color:colorEst,fontSize:'11px',fontWeight:600,whiteSpace:'nowrap'}}>{emojiEst&&<span style={{fontSize:18,marginRight:4}}>{emojiEst}</span>}{labelTxt}</span></td>
+                                }
                                 if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
                                 if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
                                 if (k === 'val_pen') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_penalidades_manual||0)>0?'#fbbf24':'#6b7280'}}>{(ot.val_penalidades_manual||0)>0?fmtMoneda(ot.val_penalidades_manual):'—'}</td>
