@@ -557,7 +557,7 @@ export default function ModuloPage() {
       firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
       firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupDefault,
-      fi_fact:      fmtTabla(fact.fecha_inicio),
+      nombre_contratista: contNombre,
       ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
       fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
@@ -571,9 +571,12 @@ export default function ModuloPage() {
       detalle_inst: inst?.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico',
     }
 
-    // Determinar qué template usar (normal o individualización)
+    // Determinar qué template usar (reubicación, individualización o estándar)
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
-    const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
+    const esReubicacion = act2 === 'ejecucion'
+    const template = esReubicacion
+      ? 'template_reubicacion.docx'
+      : esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
 
     try {
       mostrarToast('word-gen', 'info')
@@ -640,6 +643,7 @@ export default function ModuloPage() {
       firma_coordinador:  fact.datos_extra?.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
       firma_area_usuaria: fact.datos_extra?.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   fact.datos_extra?.firma_supervisor || firmaSupPdf,
+      nombre_contratista: contNombrePdf,
       fi_fact: fmtTabla(fact.fecha_inicio), ff_fact: fmtTabla(fact.fecha_fin_trabajos), fl_fact: fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact: diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos), cant_fact: String(fact.cantidad_programada||''),
       detalle_fact: fact.datos_extra?.detalle_fact||'Adjunto listado OT por correo electrónico',
@@ -648,7 +652,10 @@ export default function ModuloPage() {
       detalle_inst: inst?.datos_extra?.detalle_inst||'Adjunto listado OT por correo electrónico',
     }
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
-    const template = esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
+    const esReubicacion = act2 === 'ejecucion'
+    const template = esReubicacion
+      ? 'template_reubicacion.docx'
+      : esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
     try {
       mostrarToast('pdf-gen', 'info')
       const res = await fetch('/api/genword-inst', {

@@ -321,7 +321,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       firma_coordinador:  docFields.firma_coordinador || 'COORDINADOR "CONSORCIO SUPERVISOR"',
       firma_area_usuaria: docFields.firma_area_usuaria || 'ÁREA USUARIA - ELECTROPUNO S.A.A.',
       firma_supervisor:   docFields.firma_supervisor || 'SUPERVISOR "Consorcio San Pedro - ITEM 4"',
-      fi_fact:      fmtTabla(fact.fecha_inicio),
+      nombre_contratista: contNombre,
       ff_fact:      fmtTabla(fact.fecha_fin_trabajos),
       fl_fact:      fmtTabla(fact.fecha_limite_expedientes),
       plazo_fact:   diasHab(fact.fecha_inicio, fact.fecha_fin_trabajos),
@@ -332,7 +332,10 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos),
       cant_inst:    String(inst?.cantidad_programada || ''),
     }
-    const template = 'template_instalaciones.docx'
+    const esReubicacion = act2 === 'ejecucion'
+    const template = esReubicacion
+      ? 'template_reubicacion.docx'
+      : 'template_instalaciones.docx'
     setGenerandoDoc(true)
     setDocStatus(pdf ? 'pdf-gen' : 'word-gen')
     onDocStatus?.(pdf ? 'pdf-gen' : 'word-gen')
