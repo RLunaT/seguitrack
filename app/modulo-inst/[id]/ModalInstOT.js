@@ -117,7 +117,20 @@ function fmtFechaModal(iso) {
   return `${dia} ${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`
 }
 
-export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved, anioActivo, capacidades, feriadosDB, onDocStatus }) {
+export default function ModalInstOT({ modulo, contratistas, par, onClose, onSaved, anioActivo, capacidades, feriadosDB, onDocStatus, act1 = 'factibilidades', act2 = 'instalaciones' }) {
+  // Labels para UI
+  function actLabel(act) {
+    if (act === 'factibilidades') return 'Factibilidades'
+    if (act === 'instalaciones') return 'Inst. Nuevas'
+    if (act === 'ejecucion') return 'Ejecución'
+    return act.charAt(0).toUpperCase() + act.slice(1)
+  }
+  function actLabelLong(act) {
+    if (act === 'factibilidades') return 'Factibilidades'
+    if (act === 'instalaciones') return 'Instalaciones Nuevas'
+    if (act === 'ejecucion') return 'Ejecución'
+    return act.charAt(0).toUpperCase() + act.slice(1)
+  }
   const esEdicion = !!par
   const [form, setForm] = useState(FORM_DEFAULT)
   const [fechas, setFechas] = useState({ fact: {}, inst: {} })
@@ -133,8 +146,8 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
 
   useEffect(() => {
     if (esEdicion && par?.length) {
-      const fact = par.find(o => o.actividad === 'factibilidades') || par[0]
-      const inst = par.find(o => o.actividad === 'instalaciones')
+      const fact = par.find(o => o.actividad === act1) || par[0]
+      const inst = par.find(o => o.actividad === act2)
       setForm({
         numero_ot:          String(fact.numero_ot || ''),
         contratista_id:     String(fact.contratista_id || ''),
@@ -235,7 +248,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
 
     const otFact = {
       ...baseOT,
-      actividad:             'factibilidades',
+      actividad:             act1,
       cantidad_programada:   parseInt(form.cant_fact) || null,
       fecha_inicio:          form.fi_fact_manual || fechas.fact?.inicio || null,
       fecha_fin_trabajos:    form.ff_fact_manual || fechas.fact?.fin || null,
@@ -245,7 +258,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
 
     const otInst = {
       ...baseOT,
-      actividad:             'instalaciones',
+      actividad:             act2,
       cantidad_programada:   parseInt(form.cant_inst) || null,
       fecha_inicio:          form.fi_inst_manual || fechas.inst?.inicio || null,
       fecha_fin_trabajos:    form.ff_inst_manual || fechas.inst?.fin || null,
@@ -255,8 +268,8 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
 
     try {
       if (esEdicion) {
-        const factId = par.find(o => o.actividad === 'factibilidades')?.id
-        const instId = par.find(o => o.actividad === 'instalaciones')?.id
+        const factId = par.find(o => o.actividad === act1)?.id
+        const instId = par.find(o => o.actividad === act2)?.id
         if (factId) await supabase.from('ots').update(otFact).eq('id', factId)
         if (instId) await supabase.from('ots').update(otInst).eq('id', instId)
         if (!instId && form.cant_inst) await supabase.from('ots').insert(otInst)
@@ -264,8 +277,8 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       } else {
         const inserts = [otFact, ...(form.cant_inst ? [otInst] : [])]
         const { data: inserted } = await supabase.from('ots').insert(inserts).select()
-        const fact = inserted?.find(o => o.actividad === 'factibilidades')
-        const inst = inserted?.find(o => o.actividad === 'instalaciones')
+        const fact = inserted?.find(o => o.actividad === act1)
+        const inst = inserted?.find(o => o.actividad === act2)
         setOtGuardada({ fact, inst })
         setGuardado(true)
         onSaved(true) // refresca tabla sin cerrar modal
@@ -333,7 +346,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.${pdf ? 'pdf' : 'docx'}`
+      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioActivo || ''}.${pdf ? 'pdf' : 'docx'}`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       const okStatus = pdf ? 'pdf-ok' : 'word-ok'
@@ -406,7 +419,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
                 </div>
                 {/* Detalle Instalaciones */}
                 <div>
-                  <label className="text-xs text-gray-400 block mb-1">Detalle — Instalaciones Nuevas</label>
+                  <label className="text-xs text-gray-400 block mb-1">Detalle — {actLabelLong(act2)}</label>
                   <input className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-xs outline-none focus:border-cyan-500"
                     value={docFields.detalle_inst} onChange={e => setDoc('detalle_inst', e.target.value)} />
                 </div>
@@ -479,7 +492,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="text-base font-bold text-white">
-              {esEdicion ? '✏ Editar OT' : '+ Nueva OT'} — Instalaciones Nuevas
+              {esEdicion ? '✏ Editar OT' : '+ Nueva OT'} — {modulo?.nombre}
             </h2>
             <p className="text-xs text-gray-500 mt-1">{modulo?.nombre} · {modulo?.periodo}</p>
           </div>
@@ -534,7 +547,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           {/* Factibilidades */}
           <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#0e7490' }}>
             <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#083344', borderBottom: '0.5px solid #0e7490' }}>
-              <span className="text-xs font-bold" style={{ color: '#06b6d4' }}>Factibilidades</span>
+              <span className="text-xs font-bold" style={{ color: '#06b6d4' }}>{actLabelLong(act1)}</span>
               <span className="text-xs text-gray-500">· Ítem 1</span>
             </div>
             <div className="p-3" style={{ background: '#0a1220' }}>
@@ -606,7 +619,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
           {/* Instalaciones Nuevas */}
           <div className="rounded-xl border overflow-hidden" style={{ borderColor: '#7c3aed' }}>
             <div className="px-3 py-2 flex items-center gap-2" style={{ background: '#1a0f33', borderBottom: '0.5px solid #7c3aed' }}>
-              <span className="text-xs font-bold" style={{ color: '#c084fc' }}>Inst. Nuevas</span>
+              <span className="text-xs font-bold" style={{ color: '#c084fc' }}>{actLabel(act2)}</span>
               <span className="text-xs text-gray-500">· Ítem 2 (opcional)</span>
             </div>
             <div className="p-3" style={{ background: '#0a1220' }}>

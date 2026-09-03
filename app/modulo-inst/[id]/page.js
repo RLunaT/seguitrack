@@ -144,6 +144,8 @@ export default function ModuloPage() {
     setPeriodo(p)
     setModulo(mod)
     setFeriados(ferData || [])
+    // Las claves de capacidad se leen siempre de las mismas keys; ambos módulos
+    // (Instalaciones Nuevas y Reubicación) comparten la misma configuración.
     if (capData) {
       const cf = capData.find(c => c.clave === 'inst_capacidad_fact')
       const ci = capData.find(c => c.clave === 'inst_capacidad_inst')
@@ -224,6 +226,10 @@ export default function ModuloPage() {
 
   // Tipo de módulo — disponible desde aquí para todo el componente
   const esOT = modulo?.tipo === 'ot'
+  // Actividades dinámicas — antes del return guard para que stats pueda usarlas
+  const _actividades = modulo ? (Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')) : []
+  const act1 = _actividades[0] || 'factibilidades'
+  const act2 = _actividades[1] || 'instalaciones'
   function idPrincipal(reg) {
     return esOT ? (reg.numero_ot || reg.numero_registro) : reg.numero_registro
   }
@@ -313,7 +319,7 @@ export default function ModuloPage() {
   }
 
   const stats = {
-    total: ots.filter(o => o.actividad === 'factibilidades').length, // total OTs (por numero_ot único)
+    total: ots.filter(o => o.actividad === act1).length, // total OTs (por numero_ot único)
     cumplió_tiempo: ots.filter(o => o.estado === 1).length,
     cumplió_tarde: ots.filter(o => o.estado === 2).length,
     en_proceso: ots.filter(o => o.estado === 3).length,
@@ -321,10 +327,10 @@ export default function ModuloPage() {
     fuera: ots.filter(o => o.estado === 5).length,
     pen_total: ots.reduce((s, o) => s + (o.val_total_penalidad || 0), 0),
     // Cantidades por actividad
-    fact_prog: ots.filter(o => o.actividad === 'factibilidades').reduce((s, o) => s + (o.cantidad_programada || 0), 0),
-    fact_ent:  ots.filter(o => o.actividad === 'factibilidades').reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
-    inst_prog: ots.filter(o => o.actividad === 'instalaciones').reduce((s, o) => s + (o.cantidad_programada || 0), 0),
-    inst_ent:  ots.filter(o => o.actividad === 'instalaciones').reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
+    fact_prog: ots.filter(o => o.actividad === act1).reduce((s, o) => s + (o.cantidad_programada || 0), 0),
+    fact_ent:  ots.filter(o => o.actividad === act1).reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
+    inst_prog: ots.filter(o => o.actividad === act2).reduce((s, o) => s + (o.cantidad_programada || 0), 0),
+    inst_ent:  ots.filter(o => o.actividad === act2).reduce((s, o) => s + (o.cantidad_entregada || 0), 0),
   }
 
   const otsFiltradas = ots.filter(ot => {
@@ -502,8 +508,8 @@ export default function ModuloPage() {
   async function generarWordDirecto(ot) {
     // Buscar el par completo de actividades para esta OT
     const numeroOt = ot.numero_ot
-    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'factibilidades') || ot
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'instalaciones')
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2)
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -581,7 +587,7 @@ export default function ModuloPage() {
       const disposition = res.headers.get('Content-Disposition') || ''
       const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
       const m = disposition.match(/filename="([^"]+)"/)
-      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.docx`)
+      const filename = mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.docx`)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = filename
@@ -595,8 +601,8 @@ export default function ModuloPage() {
   // de origen que generarWordDirecto, mismo manejo de nombre de archivo.
   async function generarPdfDirecto(ot) {
     const numeroOt = ot.numero_ot
-    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'factibilidades') || ot
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === 'instalaciones')
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2)
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -654,7 +660,7 @@ export default function ModuloPage() {
       const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} Item 04 Instalaciones Nuevas 2026 Contrato 48-2025.pdf`
+      a.href = url; a.download = `OT-${String(vars.numero_ot).padStart(3,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.pdf`
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
       mostrarToast('pdf-ok', 'ok')
@@ -721,9 +727,23 @@ export default function ModuloPage() {
   )
   if (!modulo) return <div className="p-6 text-gray-400">Módulo no encontrado.</div>
 
-  const actividades = Array.isArray(modulo.actividades) ? modulo.actividades : JSON.parse(modulo.actividades || '[]')
+  const actividades = _actividades
   const motivos = Array.isArray(modulo.motivos) ? modulo.motivos : JSON.parse(modulo.motivos || '[]')
   const tienePlantilla = !!modulo.plantilla_titulo
+
+  // Labels para mostrar en UI — capitaliza primera letra de cada palabra
+  function actLabel(act) {
+    if (act === 'factibilidades') return 'Factibilidades'
+    if (act === 'instalaciones') return 'Inst. Nuevas'
+    if (act === 'ejecucion') return 'Ejecución'
+    return act.charAt(0).toUpperCase() + act.slice(1)
+  }
+  function actLabelLong(act) {
+    if (act === 'factibilidades') return 'Factibilidades'
+    if (act === 'instalaciones') return 'Instalaciones Nuevas'
+    if (act === 'ejecucion') return 'Ejecución'
+    return act.charAt(0).toUpperCase() + act.slice(1)
+  }
 
   // Columnas visibles para la vista previa estilo Excel
   const colsActivasBase = CAMPOS_BASE.filter(c => {
@@ -885,6 +905,8 @@ export default function ModuloPage() {
                   modulo,
                   anio: anioSelec,
                   camposExtra,
+                  act1,
+                  act2,
                 })
               })
               if (!res.ok) { alert('Error al exportar: ' + await res.text()); return }
@@ -920,9 +942,9 @@ export default function ModuloPage() {
       {/* KPIs */}
       <div className="grid gap-2 px-6 py-3" style={{ gridTemplateColumns: '1fr 1fr 0.6fr 0.6fr' }}>
 
-        {/* Factibilidades */}
+        {/* Actividad 1 (Factibilidades) */}
         <div className="card py-2.5 px-3" style={{ border: '1.5px solid #1D9E75' }}>
-          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Factibilidades</div>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">{actLabelLong(act1)}</div>
           <div className="flex items-baseline gap-1.5 mb-1.5">
             <span className="text-xl font-bold font-mono" style={{ color: '#1D9E75' }}>{stats.fact_ent}</span>
             <span className="text-xs text-gray-500">entregadas</span>
@@ -937,9 +959,9 @@ export default function ModuloPage() {
           </div>
         </div>
 
-        {/* Instalaciones Nuevas */}
+        {/* Actividad 2 (Instalaciones / Ejecución) */}
         <div className="card py-2.5 px-3" style={{ border: '1.5px solid #7F77DD' }}>
-          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">Instalaciones nuevas</div>
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1.5">{actLabelLong(act2)}</div>
           <div className="flex items-baseline gap-1.5 mb-1.5">
             <span className="text-xl font-bold font-mono" style={{ color: '#7F77DD' }}>{stats.inst_ent}</span>
             <span className="text-xs text-gray-500">entregadas</span>
@@ -1119,8 +1141,8 @@ export default function ModuloPage() {
                         }
                       }
                       return grupos.flatMap((par, gi) => {
-                        const fact = par.find(o => o.actividad === 'factibilidades')
-                        const inst = par.find(o => o.actividad === 'instalaciones')
+                        const fact = par.find(o => o.actividad === act1)
+                        const inst = par.find(o => o.actividad === act2)
                         const ref = fact || inst
                         if (!ref) return []
                         const rowSpan = fact && inst ? 2 : 1
@@ -1176,8 +1198,8 @@ export default function ModuloPage() {
                   }}>{seleccionados.has(ref.id)?'☑':'☐'}</button>}</div></td>
                                 }
                                 if (k === 'actividad') {
-                                  const esInst = ot.actividad === 'instalaciones'
-                                  return <td key={k}><span style={{display:'inline-block',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:600,border:`1px solid ${esInst?'#7c3aed':'#0e7490'}`,background:esInst?'#1a0f33':'#083344',color:esInst?'#c084fc':'#06b6d4'}}>{esInst?'Inst. Nuevas':'Factibilidades'}</span></td>
+                                  const esAct2 = ot.actividad === act2
+                                  return <td key={k}><span style={{display:'inline-block',padding:'2px 8px',borderRadius:99,fontSize:11,fontWeight:600,border:`1px solid ${esAct2?'#7c3aed':'#0e7490'}`,background:esAct2?'#1a0f33':'#083344',color:esAct2?'#c084fc':'#06b6d4'}}>{esAct2?actLabel(act2):actLabel(act1)}</span></td>
                                 }
                                 if (k === 'semana') return <td key={k} className="text-xs text-gray-400">{ot.semana||'—'}</td>
                                 if (k === 'progreso') return <td key={k}><div className="flex items-center gap-2"><div className="prog-bar"><div className="prog-fill" style={{width:`${pct}%`}}/></div><span className="text-xs font-mono">{pct}%</span></div></td>
@@ -1232,7 +1254,7 @@ export default function ModuloPage() {
               <div className="flex gap-2 mb-4">
                 {[
                   { key: 'fact', label: 'Factibilidades', color: '#06b6d4', bg: '#083344', border: '#0e7490' },
-                  { key: 'inst', label: 'Instalaciones Nuevas', color: '#c084fc', bg: '#1a0f33', border: '#7c3aed' },
+                  { key: 'inst', label: actLabelLong(act2), color: '#c084fc', bg: '#1a0f33', border: '#7c3aed' },
                 ].map(a => (
                   <button key={a.key} onClick={() => { setCapTab(a.key); setCapValor(String(capacidades[a.key])) }}
                     className="px-4 py-2 rounded-lg text-xs font-semibold border transition-all"
@@ -1248,7 +1270,7 @@ export default function ModuloPage() {
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
                     <label className="text-xs text-gray-400 block mb-1">
-                      Capacidad diaria — {capTab === 'fact' ? 'Factibilidades' : 'Instalaciones Nuevas'}
+                      Capacidad diaria — {capTab === 'fact' ? actLabelLong(act1) : actLabelLong(act2)}
                     </label>
                     <input type="text" inputMode="numeric"
                       className="w-full px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-sm font-bold outline-none focus:border-cyan-500"
@@ -1258,7 +1280,7 @@ export default function ModuloPage() {
                   <button disabled={savingCap} onClick={async () => {
                     setSavingCap(true)
                     const clave = capTab === 'fact' ? 'inst_capacidad_fact' : 'inst_capacidad_inst'
-                    await supabase.from('config_global').upsert({ clave, valor: capValor, descripcion: `Capacidad diaria ${capTab === 'fact' ? 'Factibilidades' : 'Instalaciones Nuevas'}` })
+                    await supabase.from('config_global').upsert({ clave, valor: capValor, descripcion: `Capacidad diaria ${capTab === 'fact' ? actLabelLong(act1) : actLabelLong(act2)}` })
                     setCapacidades(p => ({ ...p, [capTab]: parseInt(capValor)||p[capTab] }))
                     setSavingCap(false)
                     setCapTab(null)
@@ -1450,6 +1472,8 @@ export default function ModuloPage() {
           capacidades={capacidades}
           feriadosDB={feriados}
           onDocStatus={(s) => mostrarToast(s)}
+          act1={act1}
+          act2={act2}
         />
       )}
 
@@ -1536,7 +1560,7 @@ export default function ModuloPage() {
           <div className="rounded-2xl border border-red-800 p-6 w-full max-w-sm text-center" style={{ background: '#0f1a2e' }}>
             <div style={{ fontSize: 36 }} className="mb-3">🗑️</div>
             <p className="text-white font-semibold text-sm mb-1">¿Eliminar {Math.ceil(seleccionados.size / 2)} OT(s) seleccionada(s)?</p>
-            <p className="text-gray-400 text-xs mb-4">Se eliminarán todas sus actividades (Factibilidades e Instalaciones). Esta acción no se puede deshacer.</p>
+            <p className="text-gray-400 text-xs mb-4">Se eliminarán todas sus actividades ({actLabelLong(act1)} e {actLabelLong(act2)}). Esta acción no se puede deshacer.</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmEliminar(false)}
                 className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">
@@ -1564,14 +1588,14 @@ export default function ModuloPage() {
                   <button onClick={() => { setSegActSelec('fact'); setSegFecha(otSeg.fact?.fecha_reporte||''); setSegCant(String(otSeg.fact?.cantidad_entregada||'')) }}
                     className="w-full py-3 rounded-xl border text-xs font-semibold text-left px-4 transition-all hover:brightness-110"
                     style={{ background: '#083344', borderColor: '#0e7490', color: '#06b6d4' }}>
-                    Factibilidades
+                    {actLabelLong(act1)}
                     {otSeg.fact?.fecha_reporte && <span className="ml-2 text-gray-500 font-normal">· {otSeg.fact.fecha_reporte}</span>}
                   </button>
                   {otSeg.inst && (
                     <button onClick={() => { setSegActSelec('inst'); setSegFecha(otSeg.inst?.fecha_reporte||''); setSegCant(String(otSeg.inst?.cantidad_entregada||'')) }}
                       className="w-full py-3 rounded-xl border text-xs font-semibold text-left px-4 transition-all hover:brightness-110"
                       style={{ background: '#1a0f33', borderColor: '#7c3aed', color: '#c084fc' }}>
-                      Instalaciones Nuevas
+                      {actLabelLong(act2)}
                       {otSeg.inst?.fecha_reporte && <span className="ml-2 text-gray-500 font-normal">· {otSeg.inst.fecha_reporte}</span>}
                     </button>
                   )}
@@ -1583,7 +1607,7 @@ export default function ModuloPage() {
               <>
                 <button onClick={() => setSegActSelec(null)} className="text-xs text-gray-500 hover:text-gray-300 mb-3 flex items-center gap-1">← Volver</button>
                 <h3 className="text-sm font-bold text-white mb-1">
-                  {segActSelec === 'fact' ? '📊 Seguimiento — Factibilidades' : '📊 Seguimiento — Instalaciones Nuevas'}
+                  {segActSelec === 'fact' ? `📊 Seguimiento — ${actLabelLong(act1)}` : `📊 Seguimiento — ${actLabelLong(act2)}`}
                 </h3>
                 <p className="text-xs text-gray-500 mb-4">OT-{String(otSeg.fact?.numero_ot).padStart(2,'0')}</p>
                 <div className="space-y-3">

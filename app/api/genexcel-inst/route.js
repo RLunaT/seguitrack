@@ -51,15 +51,23 @@ function fmtFecha(v) {
 
 export async function POST(req) {
   try {
-    const { ots, contratistas, modulo, anio, camposExtra = [] } = await req.json()
+    const { ots, contratistas, modulo, anio, camposExtra = [], act1 = 'factibilidades', act2 = 'instalaciones' } = await req.json()
 
-    // Agrupar OTs por numero_ot — cada grupo tiene fact e inst
+    // Labels para columna Actividad
+    function actLabelLong(act) {
+      if (act === 'factibilidades') return 'Factibilidades'
+      if (act === 'instalaciones') return 'Instalaciones Nuevas'
+      if (act === 'ejecucion') return 'Ejecución'
+      return act.charAt(0).toUpperCase() + act.slice(1)
+    }
+
+    // Agrupar OTs por numero_ot — cada grupo tiene act1 y act2
     const grupos = {}
     for (const ot of ots) {
       const key = ot.numero_ot
       if (!grupos[key]) grupos[key] = { fact: null, inst: null }
-      if (ot.actividad === 'factibilidades') grupos[key].fact = ot
-      else if (ot.actividad === 'instalaciones') grupos[key].inst = ot
+      if (ot.actividad === act1) grupos[key].fact = ot
+      else if (ot.actividad === act2) grupos[key].inst = ot
     }
     const gruposOrdenados = Object.entries(grupos).sort(([a],[b]) => Number(a) - Number(b))
 
@@ -152,14 +160,14 @@ export async function POST(req) {
       const contNombre = contratistas?.find(c => c.id === (fact || inst)?.contratista_id)?.nombre || ''
 
       // Para cada actividad (fact, inst)
-      for (const [esFirst, ot, esF] of [
+      for (const [esFirst, ot, esAct1] of [
         [true,  fact, true ],
         [false, inst, false],
       ]) {
         if (!ot) continue
-        const bgArgb = esF ? C.azulFact : C.moradoInst
-        const fgArgb = esF ? C.azulTexto : C.moradoTexto
-        const actColor = esF ? C.azulAct : C.moradoAct
+        const bgArgb = esAct1 ? C.azulFact : C.moradoInst
+        const fgArgb = esAct1 ? C.azulTexto : C.moradoTexto
+        const actColor = esAct1 ? C.azulAct : C.moradoAct
 
         // Plazo días calendario
         const plazo = ot.fecha_inicio && ot.fecha_fin_trabajos
@@ -176,11 +184,11 @@ export async function POST(req) {
           numero_ot:    esFirst ? `OT-${String(numero_ot).padStart(2,'0')}` : '',
           contratista:  esFirst ? contNombre : '',
           contrato:     esFirst ? (ot.contrato || '').replace(/^contrato\s+/i,'').trim() : '',
-          detalle:      esF
+          detalle:      esAct1
                           ? (ot.datos_extra?.detalle_fact || 'Adjunto listado OT por correo electrónico')
                           : (ot.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico'),
-          actividad:    esF ? 'Factibilidades' : 'Instalaciones Nuevas',
-          fecha_entrega:esFirst ? fmtFecha(ot.datos_extra?.doc_fecha_entrega) : '',
+          actividad:    esAct1 ? actLabelLong(act1) : actLabelLong(act2),
+          fecha_entrega:esFirst  ? fmtFecha(ot.datos_extra?.doc_fecha_entrega) : '',
           fi:           fmtFecha(ot.fecha_inicio),
           ff:           fmtFecha(ot.fecha_fin_trabajos),
           fl:           fmtFecha(ot.fecha_limite_expedientes),
