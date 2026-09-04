@@ -431,7 +431,6 @@ function SidebarInner({ mobileOpen, onMobileClose, theme, onToggleTheme }) {
                 {!collapsed && (
                   <div className="flex-1 min-w-0">
                     <span style={{fontWeight:activo?600:400, fontSize:12, display:'block', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{mod.nombre}</span>
-                    <span style={{fontSize:10, opacity:0.4}}>{mod.anio}</span>
                   </div>
                 )}
               </div>

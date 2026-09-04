@@ -623,7 +623,7 @@ export default function ModuloPage() {
       const itemNumW   = itemMatchW ? itemMatchW[1] : ''
       const baseNameW  = esReubicacion
         ? `OT N° ${vars.numero_ot} Ítem ${itemNumW} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
-        : `OT-${String(vars.numero_ot).padStart(2,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}`
+        : `OT ${vars.numero_ot} Ítem ${itemNumW} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}`
       // Para reubicación usamos siempre nuestro nombre; para otros módulos usamos el del servidor
       const filename = esReubicacion ? `${baseNameW}.docx` : (mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `${baseNameW}.docx`))
       const url = URL.createObjectURL(blob)
@@ -712,7 +712,7 @@ export default function ModuloPage() {
       const itemNumP    = itemMatchP ? itemMatchP[1] : ''
       const filenamePdf = esReubicacion
         ? `OT N° ${vars.numero_ot} Ítem ${itemNumP} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}.pdf`
-        : `OT-${vars.numero_ot} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec}.pdf`
+        : `OT ${vars.numero_ot} Ítem ${itemNumP} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}.pdf`
       a.href = url; a.download = filenamePdf
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
@@ -1125,19 +1125,10 @@ export default function ModuloPage() {
                     {motivos.map(m=><option key={m} value={m}>{m}</option>)}
                   </select>
                 )}
-                {isColVisible('semana') && (
-                  <select className="input-base text-xs" style={{width:100}} value={columnFilters.semana||''} onChange={e=>setColFilter('semana',e.target.value)}>
-                    <option value="" disabled hidden>Semana</option>
-                    <option value="">Todas las semanas</option>
-                    {[...new Set(ots.map(o=>o.semana).filter(Boolean))].sort().map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
-                {(isColVisible('fecha_inicio')||isColVisible('fecha_limite')||isColVisible('fecha_reporte')) && (
-                  <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
-                    onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
-                    📅 Fechas{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
-                  </button>
-                )}
+                <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
+                  onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
+                  📅 Filtrar por fecha{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
+                </button>
                 {(buscar||filtEstado||filtContratista||Object.values(columnFilters).some(v=>v&&v!=='1')) && (
                   <button className="text-xs px-2 py-1 rounded border border-red-900 text-red-400 hover:bg-red-950"
                     onClick={()=>{setColumnFilters({});setFiltContratista('');setFiltEstado('');setBuscar('')}}>✕</button>
