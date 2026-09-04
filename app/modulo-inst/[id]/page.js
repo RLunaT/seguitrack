@@ -624,8 +624,7 @@ export default function ModuloPage() {
       const baseNameW  = esReubicacion
         ? `OT N° ${vars.numero_ot} Ítem ${itemNumW} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
         : `OT ${vars.numero_ot} Ítem ${itemNumW} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}`
-      // Para reubicación usamos siempre nuestro nombre; para otros módulos usamos el del servidor
-      const filename = esReubicacion ? `${baseNameW}.docx` : (mUtf8 ? decodeURIComponent(mUtf8[1]) : (m ? m[1] : `${baseNameW}.docx`))
+      const filename = `${baseNameW}.docx`
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = filename
