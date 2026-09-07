@@ -341,21 +341,22 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
     setDocStatus(pdf ? 'pdf-gen' : 'word-gen')
     onDocStatus?.(pdf ? 'pdf-gen' : 'word-gen')
     try {
+      const esReubMod = act2 === 'ejecucion'
+      const itemMatchMod = contNombre.match(/[ÍI]tem\s*(\d+)/i)
+      const itemNumMod   = itemMatchMod ? itemMatchMod[1] : ''
+      const baseNameMod  = esReubMod
+        ? `OT N° ${vars.numero_ot} Ítem ${itemNumMod} Reubicación, Normalización de suministros ${anioActivo || ''} Contrato ${vars.contrato}`
+        : `OT ${vars.numero_ot} Ítem ${itemNumMod} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioActivo || ''} Contrato ${vars.contrato}`
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template, vars, pdf })
+        body: JSON.stringify({ template, vars, pdf, filename: baseNameMod })
       })
       if (!res.ok) { setDocStatus('error'); onDocStatus?.('error'); alert('Error: ' + await res.text()); return }
       const blob = new Blob([await res.arrayBuffer()], { type: pdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      const esReubMod = act2 === 'ejecucion'
-      const itemMatchMod = contNombre.match(/[ÍI]tem\s*(\d+)/i)
-      const itemNumMod   = itemMatchMod ? itemMatchMod[1] : ''
-      const filenameMod  = esReubMod
-        ? `OT N° ${vars.numero_ot} Ítem ${itemNumMod} Reubicación, Normalización de suministros ${anioActivo || ''} Contrato ${vars.contrato}.${pdf ? 'pdf' : 'docx'}`
-        : `OT-${String(vars.numero_ot).padStart(2,'0')} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioActivo || ''}.${pdf ? 'pdf' : 'docx'}`
+      const filenameMod  = `${baseNameMod}.${pdf ? 'pdf' : 'docx'}`
       a.href = url; a.download = filenameMod
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
