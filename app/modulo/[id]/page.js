@@ -336,8 +336,8 @@ export default function ModuloPage() {
   }).filter(ot => {
     if (!modulo?.nombre?.toLowerCase().includes('contraste')) return true
     const motivo = (ot.motivo_ot || '').toUpperCase()
-    if (subTabContraste === 'ntcse') return motivo.includes('NTCSE')
-    if (subTabContraste === 'p227')  return motivo.includes('P227')
+    if (subTabContraste === 'ntcse') return motivo.startsWith('NTCSE')
+    if (subTabContraste === 'p227')  return motivo === 'P-227'
     return true
   })
 
