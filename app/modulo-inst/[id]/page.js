@@ -607,23 +607,21 @@ export default function ModuloPage() {
       ? 'template_reubicacion.docx'
       : esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
 
+    const itemMatchW = contNombre.match(/[ÍI]tem\s*(\d+)/i)
+    const itemNumW   = itemMatchW ? itemMatchW[1] : ''
+    const baseNameW  = esReubicacion
+      ? `OT N° ${vars.numero_ot} Ítem ${itemNumW} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
+      : `OT ${vars.numero_ot} Ítem ${itemNumW} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}`
+
     try {
       mostrarToast('word-gen', 'info')
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template, vars })
+        body: JSON.stringify({ template, vars, filename: baseNameW })
       })
       if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar Word: ' + await res.text()); return }
       const blob = await res.blob()
-      const disposition = res.headers.get('Content-Disposition') || ''
-      const mUtf8 = disposition.match(/filename\*=UTF-8''([^;]+)/)
-      const m = disposition.match(/filename="([^"]+)"/)
-      const itemMatchW = contNombre.match(/[ÍI]tem\s*(\d+)/i)
-      const itemNumW   = itemMatchW ? itemMatchW[1] : ''
-      const baseNameW  = esReubicacion
-        ? `OT N° ${vars.numero_ot} Ítem ${itemNumW} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
-        : `OT ${vars.numero_ot} Ítem ${itemNumW} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}`
       const filename = `${baseNameW}.docx`
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -696,22 +694,23 @@ export default function ModuloPage() {
     const template = esReubicacion
       ? 'template_reubicacion.docx'
       : esIndividualizacion ? 'template_individualizacion.docx' : 'template_instalaciones.docx'
+    const itemMatchP  = contNombrePdf.match(/[ÍI]tem\s*(\d+)/i)
+    const itemNumP    = itemMatchP ? itemMatchP[1] : ''
+    const baseNameP   = esReubicacion
+      ? `OT N° ${vars.numero_ot} Ítem ${itemNumP} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}`
+      : `OT ${vars.numero_ot} Ítem ${itemNumP} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}`
     try {
       mostrarToast('pdf-gen', 'info')
       const res = await fetch('/api/genword-inst', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template, vars, pdf: true })
+        body: JSON.stringify({ template, vars, pdf: true, filename: baseNameP })
       })
       if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar PDF: ' + await res.text()); return }
       const blob = new Blob([await res.arrayBuffer()], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      const itemMatchP  = contNombrePdf.match(/[ÍI]tem\s*(\d+)/i)
-      const itemNumP    = itemMatchP ? itemMatchP[1] : ''
-      const filenamePdf = esReubicacion
-        ? `OT N° ${vars.numero_ot} Ítem ${itemNumP} Reubicación, Normalización de suministros ${anioSelec} Contrato ${vars.contrato}.pdf`
-        : `OT ${vars.numero_ot} Ítem ${itemNumP} ${modulo?.nombre || 'Instalaciones Nuevas'} ${anioSelec} Contrato ${vars.contrato}.pdf`
+      const filenamePdf = `${baseNameP}.pdf`
       a.href = url; a.download = filenamePdf
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)

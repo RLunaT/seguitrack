@@ -127,7 +127,7 @@ async function aplicarOverlayReubicacion(pdfBuffer, vars) {
 
 export async function POST(request) {
   try {
-    const { template, vars, pdf = false } = await request.json()
+    const { template, vars, pdf = false, filename: clientFilename } = await request.json()
 
     const templatePath = path.join(process.cwd(), 'public', 'templates', template)
     if (!fs.existsSync(templatePath)) {
@@ -148,14 +148,14 @@ export async function POST(request) {
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     })
 
-    const nombreBase = `OT-${String(vars?.numero_ot||'doc')}_Instalaciones_Nuevas`
+    const nombreBase = clientFilename || `OT-${String(vars?.numero_ot||'doc')}_Instalaciones_Nuevas`
 
     if (!pdf) {
       return new NextResponse(wordBuf, {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'Content-Disposition': `attachment; filename="${nombreBase}.docx"`,
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(nombreBase)}.docx`,
         },
       })
     }
@@ -196,7 +196,7 @@ export async function POST(request) {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${nombreBase}.pdf"`,
+        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(nombreBase)}.pdf`,
       },
     })
   } catch (e) {
