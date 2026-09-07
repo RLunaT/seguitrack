@@ -881,10 +881,19 @@ export default function ModuloPage() {
                     {motivos.map(m=><option key={m} value={m}>{m}</option>)}
                   </select>
                 )}
-                <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
-                  onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
-                  📅 Filtrar por fecha{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
-                </button>
+                {isColVisible('semana') && (
+                  <select className="input-base text-xs" style={{width:100}} value={columnFilters.semana||''} onChange={e=>setColFilter('semana',e.target.value)}>
+                    <option value="" disabled hidden>Semana</option>
+                    <option value="">Todas las semanas</option>
+                    {[...new Set(ots.map(o=>o.semana).filter(Boolean))].sort().map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
+                {(isColVisible('fecha_inicio')||isColVisible('fecha_limite')||isColVisible('fecha_reporte')) && (
+                  <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
+                    onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
+                    📅 Fechas{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
+                  </button>
+                )}
                 {(buscar||filtEstado||filtContratista||Object.values(columnFilters).some(v=>v&&v!=='1')) && (
                   <button className="text-xs px-2 py-1 rounded border border-red-900 text-red-400 hover:bg-red-950"
                     onClick={()=>{setColumnFilters({});setFiltContratista('');setFiltEstado('');setBuscar('')}}>✕</button>
@@ -892,7 +901,7 @@ export default function ModuloPage() {
                 <div className="ml-auto flex items-center gap-2 flex-shrink-0">
                   <span className="text-xs text-gray-500">{new Set(otsFiltradas.map(o=>o.numero_ot)).size}/{new Set(ots.map(o=>o.numero_ot)).size} OTs</span>
                   {!modoEliminar ? (
-                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>setModoEliminar(true)}>🗑️ Eliminar</button>
+                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{ setModoEliminar(true); setTimeout(()=>{ const el=tablaRef.current; if(!el) return; el.scrollTo({left:0,behavior:'smooth'}); },80) }}>🗑️ Eliminar</button>
                   ) : (
                     <div className="flex gap-1 items-center">
                       <button className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400" onClick={seleccionarTodas}>{seleccionados.size===otsFiltradas.length?'☐ Ninguna':'✅ Todas'}</button>

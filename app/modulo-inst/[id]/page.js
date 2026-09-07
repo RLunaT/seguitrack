@@ -1134,7 +1134,7 @@ export default function ModuloPage() {
                 <div className="ml-auto flex items-center gap-2 flex-shrink-0">
                   <span className="text-xs text-gray-500">{new Set(otsFiltradas.map(o=>o.numero_ot)).size}/{new Set(ots.map(o=>o.numero_ot)).size} OTs</span>
                   {!modoEliminar ? (
-                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{ setModoEliminar(true); setTimeout(()=>{ const el=tablaRef.current; if(!el) return; el.scrollTo({top:0,left:0,behavior:'smooth'}); const parent=el.parentElement; if(parent){ const rect=parent.getBoundingClientRect(); window.scrollTo({top:window.scrollY+rect.top-72,behavior:'smooth'}) } },80) }}>🗑️ Eliminar</button>
+                    <button className="btn-ghost text-xs px-2 py-1" onClick={()=>{ setModoEliminar(true); setTimeout(()=>{ const el=tablaRef.current; if(!el) return; el.scrollTo({left:0,behavior:'smooth'}); },80) }}>🗑️ Eliminar</button>
                   ) : (
                     <div className="flex gap-1 items-center">
                       <button className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-400" onClick={seleccionarTodas}>{seleccionados.size===otsFiltradas.length?'☐ Ninguna':'✅ Todas'}</button>

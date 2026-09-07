@@ -307,36 +307,56 @@ function SidebarInner({ mobileOpen, onMobileClose, theme, onToggleTheme }) {
       className="flex flex-col h-full transition-all duration-200 overflow-y-auto"
       style={{ width: collapsed ? 54 : 230, background: '#0d1117', borderRight: '1px solid #21303f', flexShrink: 0 }}
     >
-      {/* Logo Electro Puno */}
+      {/* Header */}
       <div className="sticky top-0 z-10" style={{background:'#0d1117', borderBottom:'1px solid #21303f'}}>
-        <div className="flex items-center gap-2 p-3">
-          <div style={{
-            width: collapsed ? 36 : 36, height: 36, borderRadius: 8, overflow: 'hidden',
-            flexShrink: 0, background: '#fff', display:'flex', alignItems:'center', justifyContent:'center',
-          }}>
-            <img src="/logo_electropuno.jpg" alt="Electro Puno" style={{ width: 34, height: 34, objectFit: 'cover', borderRadius: 6 }} />
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <div style={{fontSize:12, fontWeight:700, color:'#ffffff', letterSpacing:'0.01em', lineHeight:1.2}}>SeguiTrack</div>
-              <div style={{fontSize:9.5, color:'rgba(255,255,255,0.45)', letterSpacing:'0.06em', textTransform:'uppercase', marginTop:1}}>Electro Puno · DGCM</div>
+        {collapsed ? (
+          <div style={{padding:'10px 0 8px', display:'flex', flexDirection:'column', alignItems:'center', gap:6}}>
+            <div style={{
+              width:36, height:28, background:'#fff', borderRadius:6,
+              display:'flex', alignItems:'center', justifyContent:'center', padding:'3px 4px',
+            }}>
+              <img src="/logo_electropuno.jpg" alt="Electro Puno"
+                style={{width:'100%', height:'100%', objectFit:'contain', display:'block'}} />
             </div>
-          )}
-          <div className="flex flex-col gap-1 flex-shrink-0">
-            <button onClick={() => setCollapsed(!collapsed)}
+            <button onClick={() => setCollapsed(false)}
               className="hidden md:flex w-6 h-6 items-center justify-center rounded transition-all"
               style={{color:'rgba(255,255,255,0.3)', fontSize:14, background:'rgba(255,255,255,0.06)'}}
               onMouseEnter={e=>e.currentTarget.style.color='rgba(255,255,255,0.8)'}
-              onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>
-              {collapsed ? '›' : '‹'}
-            </button>
-            {onMobileClose && (
-              <button onClick={onMobileClose}
-                className="flex md:hidden w-6 h-6 items-center justify-center"
-                style={{color:'rgba(255,255,255,0.5)', fontSize:16}}>✕</button>
-            )}
+              onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>›</button>
           </div>
-        </div>
+        ) : (
+          <div style={{padding:'12px 14px 10px'}}>
+            {/* Logo banner */}
+            <div style={{
+              background:'#fff', borderRadius:8,
+              padding:'5px 10px',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              height:46, marginBottom:8,
+            }}>
+              <img src="/logo_electropuno.jpg" alt="Electro Puno"
+                style={{height:'100%', width:'auto', maxWidth:'100%', objectFit:'contain', display:'block'}} />
+            </div>
+            {/* Sistema + botones */}
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+              <div>
+                <div style={{fontSize:12, fontWeight:700, color:'#fff', letterSpacing:'0.01em', lineHeight:1.1}}>SeguiTrack</div>
+                <div style={{fontSize:9, color:'rgba(255,255,255,0.35)', letterSpacing:'0.07em', textTransform:'uppercase', marginTop:2}}>DGCCM · Electro Puno S.A.A.</div>
+              </div>
+              <div style={{display:'flex', gap:4, alignItems:'center'}}>
+                <button onClick={() => setCollapsed(true)}
+                  className="hidden md:flex w-6 h-6 items-center justify-center rounded transition-all"
+                  style={{color:'rgba(255,255,255,0.3)', fontSize:14, background:'rgba(255,255,255,0.06)'}}
+                  onMouseEnter={e=>e.currentTarget.style.color='rgba(255,255,255,0.8)'}
+                  onMouseLeave={e=>e.currentTarget.style.color='rgba(255,255,255,0.3)'}>‹</button>
+                {onMobileClose && (
+                  <button onClick={onMobileClose}
+                    className="flex md:hidden w-6 h-6 items-center justify-center"
+                    style={{color:'rgba(255,255,255,0.5)', fontSize:16}}>✕</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {/* Toggle día/noche */}
         {!collapsed && (
           <button onClick={onToggleTheme} style={{
