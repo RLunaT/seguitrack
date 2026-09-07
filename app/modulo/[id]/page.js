@@ -70,6 +70,7 @@ export default function ModuloPage() {
   const searchParams = useSearchParams()
   const periodoUrl = searchParams.get('periodo')
   const [tab, setTab] = useState('tabla')
+  const [subTabContraste, setSubTabContraste] = useState('ntcse')
   const [modulo, setModulo] = useState(null)
   const [ots, setOts] = useState([])
   const [contratistas, setContratistas] = useState([])
@@ -332,6 +333,12 @@ export default function ModuloPage() {
     if (key === 'contratista') return mult * (a._cont?.nombre || '').localeCompare(b._cont?.nombre || '')
     if (key === 'semana') return mult * (a.semana || '').localeCompare(b.semana || '')
     return 0
+  }).filter(ot => {
+    if (!modulo?.nombre?.toLowerCase().includes('contraste')) return true
+    const motivo = (ot.motivo_ot || '').toUpperCase()
+    if (subTabContraste === 'ntcse') return motivo.includes('NTCSE')
+    if (subTabContraste === 'p227')  return motivo.includes('P227')
+    return true
   })
 
   async function eliminar(id_ot) {
@@ -847,6 +854,33 @@ export default function ModuloPage() {
         {/* ── TABLA ── */}
         {tab === 'tabla' && (
           <>
+            {/* ── Sub-pestañas Contraste: NTCSE / P227 ── */}
+            {modulo?.nombre?.toLowerCase().includes('contraste') && (
+              <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+                {[
+                  { key:'ntcse', label:'NTCSE', color:'#58d5c9' },
+                  { key:'p227',  label:'P227',  color:'#a78bfa' },
+                ].map(s => {
+                  const active = subTabContraste === s.key
+                  return (
+                    <button key={s.key} onClick={() => setSubTabContraste(s.key)}
+                      onMouseEnter={e => { if(!active){ e.currentTarget.style.background=`rgba(${s.key==='ntcse'?'88,213,201':'167,139,250'},0.15)`; e.currentTarget.style.borderColor=s.color+'66'; e.currentTarget.style.color=s.color }}}
+                      onMouseLeave={e => { if(!active){ e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='transparent'; e.currentTarget.style.color=s.color+'99' }}}
+                      style={{
+                        display:'flex', alignItems:'center', gap:6,
+                        padding:'5px 16px', borderRadius:7,
+                        background: active ? `rgba(${s.key==='ntcse'?'88,213,201':'167,139,250'},0.15)` : 'transparent',
+                        border: `1px solid ${active ? s.color : 'transparent'}`,
+                        color: active ? s.color : s.color+'99',
+                        fontWeight: active ? 700 : 500, fontSize:12,
+                        cursor:'pointer', transition:'all 0.15s',
+                      }}>
+                      {s.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
             {/* ── Barra de filtros compacta ── */}
             <div className="mb-3">
               <div className="flex gap-1.5 items-center p-2 rounded-lg border border-gray-800" style={{background:'#0d1526'}}>
@@ -891,7 +925,7 @@ export default function ModuloPage() {
                 {(isColVisible('fecha_inicio')||isColVisible('fecha_limite')||isColVisible('fecha_reporte')) && (
                   <button className={`text-xs px-2 py-1 rounded border transition-all ${(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?'border-blue-600 bg-blue-950 text-blue-300':'border-gray-700 text-gray-500 hover:text-gray-300'}`}
                     onClick={()=>setColFilter('_showFechas', columnFilters._showFechas?'':'1')}>
-                    📅 Fechas{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
+                    📅 Filtrar por fecha{(columnFilters.fecha_inicio||columnFilters.fecha_limite||columnFilters.fecha_reporte)?' ●':''}
                   </button>
                 )}
                 {(buscar||filtEstado||filtContratista||Object.values(columnFilters).some(v=>v&&v!=='1')) && (
