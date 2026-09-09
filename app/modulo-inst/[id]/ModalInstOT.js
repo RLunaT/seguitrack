@@ -144,6 +144,31 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   const [generandoDoc, setGenerandoDoc] = useState(false)
   const [docStatus, setDocStatus] = useState(null) // null | 'word-gen' | 'word-ok' | 'pdf-gen' | 'pdf-ok' | 'error'
 
+  // Al crear (no editar): auto-incrementar N° OT y auto-seleccionar contratista único
+  useEffect(() => {
+    if (esEdicion || !modulo?.id) return
+
+    // Si hay exactamente un contratista, seleccionarlo y rellenar contrato
+    if (contratistas.length === 1) {
+      const c = contratistas[0]
+      setForm(p => ({ ...p, contratista_id: String(c.id), contrato: c.contrato || '' }))
+    }
+
+    // Obtener el N° OT más alto activo en este módulo/período
+    const periodo = anioActivo || String(new Date().getFullYear())
+    supabase
+      .from('ots')
+      .select('numero_ot')
+      .eq('modulo_id', parseInt(modulo.id))
+      .eq('periodo', periodo)
+      .is('deleted_at', null)
+      .then(({ data }) => {
+        if (!data?.length) return
+        const maxOT = Math.max(...data.map(o => parseInt(o.numero_ot) || 0))
+        if (maxOT > 0) setForm(p => ({ ...p, numero_ot: String(maxOT + 1) }))
+      })
+  }, [esEdicion, modulo?.id, contratistas, anioActivo])
+
   useEffect(() => {
     if (esEdicion && par?.length) {
       const fact = par.find(o => o.actividad === act1) || par[0]
