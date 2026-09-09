@@ -25,6 +25,14 @@ function prepararParaPDF(docxBuf, vars) {
   // Dejar valores < 100% intactos para no ensanchar texto condensado.
   let fixed = docXml.replace(/<w:w w:val="(\d+)"\/>/g, (m, v) => parseInt(v) > 100 ? '<w:w w:val="100"/>' : m)
 
+  // Quita alturas fijas de fila pequeñas — LibreOffice las trata como mínimos
+  // estrictos y desordena las tablas de datos. Las filas grandes (firmas, ≥600
+  // twips) se conservan para que el área de firmas mantenga su espacio.
+  fixed = fixed.replace(/<w:trHeight w:val="(\d+)"[^/]*\/>/g, (m, val) => parseInt(val) < 600 ? '' : m)
+
+  // Limita espaciado after de párrafo — LibreOffice agrega padding extra.
+  fixed = fixed.replace(/w:after="(\d+)"/g, (m, val) => parseInt(val) > 80 ? 'w:after="40"' : m)
+
   // Procesar <w:drawing> con <wpg:wgp>:
   //   • DGCM-MC → eliminar (el overlay pdf-lib lo redibuja)
   //   • Contiene ">ITEM<" (bloque de firma) → limpiar el texto "ITEM XX"
@@ -161,7 +169,8 @@ export async function POST(request) {
     }
 
     // Para PDF: normalizar propiedades que LibreOffice interpreta distinto
-    const pdfDocxBuf = template === 'template_reubicacion.docx'
+    const TEMPLATES_CON_PREPROCESADO = ['template_reubicacion.docx', 'template_instalaciones.docx']
+    const pdfDocxBuf = TEMPLATES_CON_PREPROCESADO.includes(template)
       ? prepararParaPDF(wordBuf, vars)
       : wordBuf
 
