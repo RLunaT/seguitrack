@@ -161,7 +161,7 @@ export default function ModuloPage() {
   const cargar = useCallback(async () => {
     const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }, { data: ferData }, { data: capData }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
-      supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).order('numero_ot', { ascending: true }),
+      supabase.from('ots').select('*').eq('modulo_id', parseInt(id)).eq('periodo', anioSelec).is('deleted_at', null).order('numero_ot', { ascending: true }),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
       supabase.from('feriados').select('*').order('fecha'),
@@ -187,7 +187,7 @@ export default function ModuloPage() {
     // período actual. Sin fechas definidas = contrato vigente siempre.
     let contsOrdenados = []
     if (mod) {
-      const { data: todosMods } = await supabase.from('modulos').select('id, nombre, tipo')
+      const { data: todosMods } = await supabase.from('modulos').select('id, nombre, tipo').is('deleted_at', null)
       const idsFamiliaReal = (todosMods || [])
         .filter(m => m.tipo === mod.tipo && claveGrupo(m.nombre) === claveGrupo(mod.nombre))
         .map(m => m.id)
@@ -397,8 +397,8 @@ export default function ModuloPage() {
   })
 
   async function eliminar(id_ot) {
-    if (!confirm('¿Eliminar este registro?')) return
-    await supabase.from('ots').delete().eq('id', id_ot)
+    if (!confirm('¿Mover este registro a la papelera?')) return
+    await supabase.from('ots').update({ deleted_at: new Date().toISOString() }).eq('id', id_ot)
     cargar()
   }
 
@@ -411,7 +411,7 @@ export default function ModuloPage() {
 
   async function confirmarEliminar() {
     const ids = Array.from(seleccionados)
-    await supabase.from('ots').delete().in('id', ids)
+    await supabase.from('ots').update({ deleted_at: new Date().toISOString() }).in('id', ids)
     setSeleccionados(new Set())
     setModoEliminar(false)
     setConfirmEliminar(false)
@@ -1540,6 +1540,9 @@ export default function ModuloPage() {
             </div>
           </div>
         )}
+
+        {/* ── PAPELERA ── */}
+
       </div>
 
       {/* ── MODAL OT — Instalaciones Nuevas usa ModalInstOT ── */}
@@ -1644,8 +1647,8 @@ export default function ModuloPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
           <div className="rounded-2xl border border-red-800 p-6 w-full max-w-sm text-center" style={{ background: '#0f1a2e' }}>
             <div style={{ fontSize: 36 }} className="mb-3">🗑️</div>
-            <p className="text-white font-semibold text-sm mb-1">¿Eliminar {Math.ceil(seleccionados.size / 2)} OT(s) seleccionada(s)?</p>
-            <p className="text-gray-400 text-xs mb-4">Se eliminarán todas sus actividades ({actLabelLong(act1)} e {actLabelLong(act2)}). Esta acción no se puede deshacer.</p>
+            <p className="text-white font-semibold text-sm mb-1">¿Mover {Math.ceil(seleccionados.size / 2)} OT(s) a la papelera?</p>
+            <p className="text-gray-400 text-xs mb-4">Se moverán todas sus actividades ({actLabelLong(act1)} e {actLabelLong(act2)}). Podrás restaurarlas desde la pestaña Papelera durante 10 días.</p>
             <div className="flex gap-2">
               <button onClick={() => setConfirmEliminar(false)}
                 className="flex-1 py-2 rounded-lg border border-gray-700 text-gray-300 text-xs hover:bg-gray-800">
@@ -1654,7 +1657,7 @@ export default function ModuloPage() {
               <button onClick={confirmarEliminar}
                 className="flex-1 py-2 rounded-lg text-xs font-semibold"
                 style={{ background: '#dc2626', color: '#fff' }}>
-                Eliminar
+                Mover a papelera
               </button>
             </div>
           </div>

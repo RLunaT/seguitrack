@@ -123,7 +123,7 @@ export default function ReportesPage() {
     setLoading(true)
     const [{data:o},{data:m},{data:c},{data:cfg}] = await Promise.all([
       supabase.from('ots').select('*').order('numero_ot'),
-      supabase.from('modulos').select('id,nombre,icono,color,periodo').eq('activo',true).order('orden'),
+      supabase.from('modulos').select('id,nombre,icono,color,periodo').eq('activo',true).is('deleted_at', null).order('orden'),
       supabase.from('contratistas').select('id,nombre,contrato,tasa_penalidad').eq('activo',true),
       supabase.from('config_global').select('*'),
     ])

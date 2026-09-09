@@ -14,13 +14,34 @@ import {
 } from './docConfig'
 import { descargarWordTemplate } from './wordGen'
 
+// Plazo de ejecución = días entre fecha_inicio y fecha_fin (ambos inclusive)
+// Ej: lun 27/07 a dom 02/08 = 7 días
+function calcPlazoEjecucion(fechaIni, fechaFin) {
+  if (!fechaIni || !fechaFin) return ''
+  const d1 = new Date(fechaIni + 'T00:00:00')
+  const d2 = new Date(fechaFin + 'T00:00:00')
+  if (isNaN(d1) || isNaN(d2)) return ''
+  const days = Math.round((d2 - d1) / 86400000) + 1
+  return String(days) + (days === 1 ? ' día' : ' días')
+}
+
 // Nombre "familia" del módulo, sin el sufijo de período
 // (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
 function nombreBase(nombre) {
-  return nombre.replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+  return (nombre || '').replace(/\s*20\d{2}-[IVX]+\s*$/i, '').trim()
 }
 function claveGrupo(nombre) {
   return nombreBase(nombre).toLowerCase()
+}
+const OFFSETS_FIN_DOC = {
+  'contrastes de medidores':       6,
+  'avisos de medidores':           5,
+  'reemplazos de medidores p-227': 5,
+}
+function addDaysStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 // "2026-I" -> ene-jun, "2026-II" -> jul-dic
 function rangoDePeriodo(per) {
@@ -70,7 +91,7 @@ export default function ModuloPage() {
   const searchParams = useSearchParams()
   const periodoUrl = searchParams.get('periodo')
   const [tab, setTab] = useState('tabla')
-  const [subTabContraste, setSubTabContraste] = useState('ntcse')
+
   const [modulo, setModulo] = useState(null)
   const [ots, setOts] = useState([])
   const [contratistas, setContratistas] = useState([])
@@ -106,6 +127,13 @@ export default function ModuloPage() {
   const [sortCfg, setSortCfg] = useState({ key: 'numero_registro', dir: 'asc' })
   const [camposTabOrder, setCamposTabOrder] = useState(null)
   const [columnFilters, setColumnFilters] = useState({})
+  const [docToast, setDocToast] = useState(null)
+  const [confirmEliminar, setConfirmEliminar] = useState(false)
+
+  function mostrarToast(msg, tipo = 'info', duracion = 0) {
+    setDocToast({ msg, tipo })
+    if (duracion > 0) setTimeout(() => setDocToast(null), duracion)
+  }
 
   function setColFilter(key, val) {
     setColumnFilters(prev => ({ ...prev, [key]: val }))
@@ -118,8 +146,8 @@ export default function ModuloPage() {
     const [{ data: mod }, { data: otsData }, { data: campos }, { data: cfg }] = await Promise.all([
       supabase.from('modulos').select('*').eq('id', id).single(),
       periodoUrl
-        ? supabase.from('ots').select('*').eq('modulo_id', id).eq('periodo', periodoUrl).order('numero_registro')
-        : supabase.from('ots').select('*').eq('modulo_id', id).order('numero_registro'),
+        ? supabase.from('ots').select('*').eq('modulo_id', id).eq('periodo', periodoUrl).is('deleted_at', null).order('numero_registro')
+        : supabase.from('ots').select('*').eq('modulo_id', id).is('deleted_at', null).order('numero_registro'),
       supabase.from('modulo_campos').select('*').eq('modulo_id', id).order('orden'),
       supabase.from('config_global').select('*'),
     ])
@@ -135,7 +163,7 @@ export default function ModuloPage() {
     // período actual. Sin fechas definidas = contrato vigente siempre.
     let contsOrdenados = []
     if (mod) {
-      const { data: todosMods } = await supabase.from('modulos').select('id, nombre, tipo')
+      const { data: todosMods } = await supabase.from('modulos').select('id, nombre, tipo').is('deleted_at', null)
       const idsFamiliaReal = (todosMods || [])
         .filter(m => m.tipo === mod.tipo && claveGrupo(m.nombre) === claveGrupo(mod.nombre))
         .map(m => m.id)
@@ -333,27 +361,25 @@ export default function ModuloPage() {
     if (key === 'contratista') return mult * (a._cont?.nombre || '').localeCompare(b._cont?.nombre || '')
     if (key === 'semana') return mult * (a.semana || '').localeCompare(b.semana || '')
     return 0
-  }).filter(ot => {
-    if (!modulo?.nombre?.toLowerCase().includes('contraste')) return true
-    const motivo = (ot.motivo_ot || '').toUpperCase()
-    if (subTabContraste === 'ntcse') return motivo.startsWith('NTCSE')
-    if (subTabContraste === 'p227')  return motivo === 'P-227'
-    return true
   })
 
   async function eliminar(id_ot) {
-    if (!confirm('¿Eliminar este registro?')) return
-    await supabase.from('ots').delete().eq('id', id_ot)
+    if (!confirm('¿Mover este registro a la papelera?')) return
+    await supabase.from('ots').update({ deleted_at: new Date().toISOString() }).eq('id', id_ot)
     cargar()
   }
 
   async function eliminarSeleccionados() {
     if (seleccionados.size === 0) return
-    if (!confirm(`¿Eliminar ${seleccionados.size} registro(s) seleccionado(s)? Esta acción no se puede deshacer.`)) return
+    setConfirmEliminar(true)
+  }
+
+  async function confirmarEliminar() {
     const ids = Array.from(seleccionados)
-    await supabase.from('ots').delete().in('id', ids)
+    await supabase.from('ots').update({ deleted_at: new Date().toISOString() }).in('id', ids)
     setSeleccionados(new Set())
     setModoEliminar(false)
+    setConfirmEliminar(false)
     cargar()
   }
 
@@ -462,7 +488,7 @@ export default function ModuloPage() {
     // Evitar duplicar "Contrato" si ya está en el texto
     function limpiarContrato(c) {
       if (!c) return ''
-      return c.replace(/^contrato\s+/i, '').trim()
+      return c.replace(/^contrato\s+/i, '').replace(/^N[.]?[°º]\s*/i, '').trim()
     }
 
     try {
@@ -474,7 +500,10 @@ export default function ModuloPage() {
         fecha_inicio:       fmtDia(data.fecha_inicio),
         fecha_fin:          fmtDia(data.fecha_fin),
         fecha_limite:       fmtDia(data.fecha_limite),
+        fecha_inicio_raw:   data.fecha_inicio || '',
+        fecha_fin_raw:      data.fecha_fin || '',
         dias_plazo:         String(data.dias_plazo||'1'),
+        plazo_ejecucion:    calcPlazoEjecucion(data.fecha_inicio, data.fecha_fin),
         cantidad:           String(data.cantidad||''),
         actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
         actividad_label:    String(data.actividad_label||''),
@@ -487,8 +516,9 @@ export default function ModuloPage() {
         periodo:            String(data.periodo||periodo||''),
         titulo:             String(data.titulo||''),
       }
+      mostrarToast('word-gen', 'info')
       const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
-      if (!res.ok) { alert('Error al generar Word'); return }
+      if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar Word'); return }
       const blob = await res.blob()
 
       // Extrae el nombre real del archivo desde el header — window.open()
@@ -509,7 +539,8 @@ export default function ModuloPage() {
       a.click()
       document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      mostrarToast('word-ok', 'ok')
+    } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
   }
 
   // Genera y descarga el PDF directamente sin mostrar modal — mismo dato
@@ -533,7 +564,7 @@ export default function ModuloPage() {
     }
     function limpiarContrato(c) {
       if (!c) return ''
-      return c.replace(/^contrato\s+/i, '').trim()
+      return c.replace(/^contrato\s+/i, '').replace(/^N[.]?[°º]\s*/i, '').trim()
     }
 
     try {
@@ -545,7 +576,10 @@ export default function ModuloPage() {
         fecha_inicio:       fmtDia(data.fecha_inicio),
         fecha_fin:          fmtDia(data.fecha_fin),
         fecha_limite:       fmtDia(data.fecha_limite),
+        fecha_inicio_raw:   data.fecha_inicio || '',
+        fecha_fin_raw:      data.fecha_fin || '',
         dias_plazo:         String(data.dias_plazo||'1'),
+        plazo_ejecucion:    calcPlazoEjecucion(data.fecha_inicio, data.fecha_fin),
         cantidad:           String(data.cantidad||''),
         actividad_doc:      String(data.actividad_doc||data.actividad_label||''),
         actividad_label:    String(data.actividad_label||''),
@@ -558,8 +592,9 @@ export default function ModuloPage() {
         periodo:            String(data.periodo||periodo||''),
         titulo:             String(data.titulo||''),
       }
+      mostrarToast('pdf-gen', 'info')
       const res = await fetch('/api/genpdf', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: ot.actividad, data: payload }) })
-      if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+      if (!res.ok) { mostrarToast('error', 'error'); const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
       const arrayBuffer = await res.arrayBuffer()
       const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
 
@@ -576,7 +611,8 @@ export default function ModuloPage() {
       a.click()
       document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      mostrarToast('pdf-ok', 'ok')
+    } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
   }
 
   function abrirModalDoc(ot) {
@@ -598,7 +634,12 @@ export default function ModuloPage() {
       semana:             ot.semana || '',
       periodo:            periodo || '',
       fecha_inicio:       ot.fecha_inicio || '',
-      fecha_fin:          ot.fecha_fin_trabajos || '',
+      fecha_fin:          ot.fecha_fin_trabajos || (() => {
+        const offsetFin = OFFSETS_FIN_DOC[claveGrupo(modulo?.nombre)]
+        return (ot.fecha_inicio && offsetFin != null)
+          ? addDaysStr(ot.fecha_inicio, offsetFin)
+          : ''
+      })(),
       fecha_limite:       ot.fecha_limite_expedientes || '',
       // Plazo de ejecución para el documento: siempre inicia en 1 por defecto
       // (no el cálculo real ot.dias_plazo, que puede ser 12+ días) — editable
@@ -613,7 +654,12 @@ export default function ModuloPage() {
       actividad_doc:      de.doc_actividad          || modulo?.plantilla_actividad || ot.actividad || '',
       actividad_label:    de.doc_actividad          || modulo?.plantilla_actividad || ot.actividad || '',
       editado_por:        de.doc_editado_por        || modulo?.plantilla_editado_por || '',
-      cumplimiento:       de.doc_cumplimiento       || modulo?.plantilla_cumplimiento || '',
+      cumplimiento:       de.doc_cumplimiento       || (() => {
+        const m = (ot.motivo_ot || '').toUpperCase().trim()
+        if (m === 'NTCSE RURAL')  return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Rural'
+        if (m === 'NTCSE URBANO') return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Urbano'
+        return modulo?.plantilla_cumplimiento || ''
+      })(),
       titulo:             de.doc_titulo             || modulo?.plantilla_titulo || '',
       observaciones:      ot.observaciones || 'Ninguna',
       motivo_extra:       ot.motivo_ot || '',
@@ -823,9 +869,9 @@ export default function ModuloPage() {
       {/* Tabs */}
       <div style={{ display:'flex', gap:6, padding:'10px 24px', borderBottom:'1px solid var(--border)', background:'var(--surface)' }}>
         {[
-          { key: 'tabla',  icon: '📋', label: 'Listado', color: '#58d5c9' },
-          { key: 'gantt',  icon: '📅', label: 'Gantt',   color: '#a78bfa' },
-          { key: 'campos', icon: '⚙️', label: 'Campos',  color: '#fbbf24' },
+          { key: 'tabla',    icon: '📋', label: 'Listado',  color: '#58d5c9' },
+          { key: 'gantt',    icon: '📅', label: 'Gantt',    color: '#a78bfa' },
+          { key: 'campos',   icon: '⚙️', label: 'Campos',   color: '#fbbf24' },
         ].map(t => {
           const active = tab === t.key
           return (
@@ -854,33 +900,6 @@ export default function ModuloPage() {
         {/* ── TABLA ── */}
         {tab === 'tabla' && (
           <>
-            {/* ── Sub-pestañas Contraste: NTCSE / P227 ── */}
-            {modulo?.nombre?.toLowerCase().includes('contraste') && (
-              <div style={{ display:'flex', gap:6, marginBottom:12 }}>
-                {[
-                  { key:'ntcse', label:'NTCSE', color:'#58d5c9' },
-                  { key:'p227',  label:'P227',  color:'#a78bfa' },
-                ].map(s => {
-                  const active = subTabContraste === s.key
-                  return (
-                    <button key={s.key} onClick={() => setSubTabContraste(s.key)}
-                      onMouseEnter={e => { if(!active){ e.currentTarget.style.background=`rgba(${s.key==='ntcse'?'88,213,201':'167,139,250'},0.15)`; e.currentTarget.style.borderColor=s.color+'66'; e.currentTarget.style.color=s.color }}}
-                      onMouseLeave={e => { if(!active){ e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='transparent'; e.currentTarget.style.color=s.color+'99' }}}
-                      style={{
-                        display:'flex', alignItems:'center', gap:6,
-                        padding:'5px 16px', borderRadius:7,
-                        background: active ? `rgba(${s.key==='ntcse'?'88,213,201':'167,139,250'},0.15)` : 'transparent',
-                        border: `1px solid ${active ? s.color : 'transparent'}`,
-                        color: active ? s.color : s.color+'99',
-                        fontWeight: active ? 700 : 500, fontSize:12,
-                        cursor:'pointer', transition:'all 0.15s',
-                      }}>
-                      {s.label}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
             {/* ── Barra de filtros compacta ── */}
             <div className="mb-3">
               <div className="flex gap-1.5 items-center p-2 rounded-lg border border-gray-800" style={{background:'#0d1526'}}>
@@ -1168,7 +1187,30 @@ export default function ModuloPage() {
             </div>
           </div>
         )}
+
+        {/* ── PAPELERA ── */}
+
       </div>
+
+      {/* ── MODAL DESCARGA ── */}
+      <ModalDescarga status={docToast?.msg} onClose={() => setDocToast(null)} />
+
+      {/* ── MODAL CONFIRMAR ELIMINAR ── */}
+      {confirmEliminar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.65)' }}>
+          <div className="rounded-2xl border border-red-900 p-8 flex flex-col items-center gap-5 text-center" style={{ background: '#0f1a2e', minWidth: 300, maxWidth: 380 }}>
+            <div style={{ fontSize: 40 }}>🗑️</div>
+            <div>
+              <p className="text-white font-semibold text-sm mb-1">¿Mover {seleccionados.size} registro(s) a la papelera?</p>
+              <p className="text-gray-400 text-xs">Podrás restaurarlos desde la pestaña Papelera durante 10 días.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmEliminar(false)} className="px-5 py-2 rounded-lg text-xs font-semibold" style={{ background: '#1e293b', color: '#94a3b8' }}>Cancelar</button>
+              <button onClick={confirmarEliminar} className="px-5 py-2 rounded-lg text-xs font-semibold" style={{ background: '#ef4444', color: '#fff' }}>Mover a papelera</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL OT ── */}
       {modalOpen && (
@@ -1176,7 +1218,8 @@ export default function ModuloPage() {
           actividades={actividades} motivos={motivos} periodo={periodo}
           ot={editando} colsVisibles={colsVisibles} totalRegistros={ots.length}
           onClose={() => { setModalOpen(false); cargar() }}
-          onSave={() => { cargar() }} />
+          onSave={() => { cargar() }}
+          onDocStatus={(s) => mostrarToast(s)} />
       )}
 
       {/* ── MODAL SEGUIMIENTO ── */}
@@ -1337,15 +1380,18 @@ export default function ModuloPage() {
                         numero_ot: String(docForm.numero_ot||''), codigo_ot: String(docForm.codigo_ot||docForm.numero_ot||''),
                         contrato: String(docForm.contrato||''), fecha_entrega: docForm.fecha_entrega||'',
                         fecha_inicio: docForm.fecha_inicio||'', fecha_fin: docForm.fecha_fin||'',
-                        fecha_limite: docForm.fecha_limite||'', dias_plazo: String(docForm.dias_plazo||'1'),
+                        fecha_limite: docForm.fecha_limite||'', fecha_inicio_raw: docForm.fecha_inicio||'',
+                        fecha_fin_raw: docForm.fecha_fin||'', dias_plazo: String(docForm.dias_plazo||'1'),
+                        plazo_ejecucion: calcPlazoEjecucion(docForm.fecha_inicio, docForm.fecha_fin),
                         cantidad: String(docForm.cantidad||''), actividad_doc: String(docForm.actividad_doc||docForm.actividad_label||''),
                         actividad_label: String(docForm.actividad_label||''), cumplimiento: String(docForm.cumplimiento||''),
                         editado_por: String(docForm.editado_por||''), coordinador: String(docForm.coordinador||''),
                         contratista_nombre: String(docForm.contratista_nombre||''), motivo_extra: String(docForm.motivo_extra||''),
                         semana: String(docForm.semana||''), periodo: String(docForm.periodo||periodo||''), titulo: String(docForm.titulo||''),
                       }
+                      mostrarToast('word-gen', 'info')
                       const res = await fetch('/api/genword', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
-                      if (!res.ok) { alert('Error al generar Word'); return }
+                      if (!res.ok) { mostrarToast('error', 'error'); alert('Error al generar Word'); return }
                       const blob = await res.blob()
 
                       // Extrae el nombre real del archivo desde el header — window.open()
@@ -1365,13 +1411,15 @@ export default function ModuloPage() {
                       a.click()
                       document.body.removeChild(a)
                       setTimeout(() => URL.revokeObjectURL(url), 10000)
-                    } catch(e) { alert('Error: ' + e.message) }
+                      mostrarToast('word-ok', 'ok')
+                    } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
                   })()}>📝 Word (.docx)</button>
               <button className="btn-primary" onClick={async () => {
                 try {
                   const data = { ...docForm, periodo: docForm.periodo || periodo, titulo: docForm.titulo || otParaDoc.actividad }
+                  mostrarToast('pdf-gen', 'info')
                   const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: modulo.id, actividad: otParaDoc.actividad, data }) })
-                  if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+                  if (!res.ok) { mostrarToast('error', 'error'); const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
                   const arrayBuffer = await res.arrayBuffer()
                   const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
 
@@ -1390,8 +1438,9 @@ export default function ModuloPage() {
                   a.click()
                   document.body.removeChild(a)
                   setTimeout(() => URL.revokeObjectURL(url), 2000)
+                  mostrarToast('pdf-ok', 'ok')
                   setModalDoc(false)
-                } catch(e) { alert('Error: ' + e.message) }
+                } catch(e) { mostrarToast('error', 'error'); alert('Error: ' + e.message) }
               }}>📥 PDF</button>
             </div>
           </div>
@@ -1801,6 +1850,38 @@ function DashboardModulo({ ots, contratistas, modulo }) {
     </div>
   )
 }
+// ── ModalDescarga — notificación de generación de documento ───
+function ModalDescarga({ status, onClose }) {
+  if (!status) return null
+  const listo = status === 'word-ok' || status === 'pdf-ok'
+  const error = status === 'error'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+      <div className="rounded-2xl border p-8 flex flex-col items-center gap-4 text-center"
+        style={{ background: '#0f1a2e', borderColor: error ? '#991b1b' : listo ? '#166534' : '#0e7490', minWidth: 280, maxWidth: 360 }}>
+        {!listo && !error && (
+          <div style={{ width: 48, height: 48, border: '4px solid #0e7490', borderTopColor: '#06b6d4', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        )}
+        {listo && <div style={{ fontSize: 40 }}>✅</div>}
+        {error && <div style={{ fontSize: 40 }}>❌</div>}
+        <div>
+          {status === 'word-gen' && <><p className="text-white font-semibold text-sm mb-1">Generando documento Word</p><p className="text-gray-400 text-xs">Por favor espera un momento...</p></>}
+          {status === 'pdf-gen'  && <><p className="text-white font-semibold text-sm mb-1">Generando PDF</p><p className="text-gray-400 text-xs">Esto puede tomar unos segundos si el servidor se reinició recientemente...</p></>}
+          {status === 'word-ok'  && <><p className="text-green-400 font-semibold text-sm mb-1">¡Listo!</p><p className="text-gray-400 text-xs">La orden de trabajo se descargó correctamente en Word.</p></>}
+          {status === 'pdf-ok'   && <><p className="text-green-400 font-semibold text-sm mb-1">¡Listo!</p><p className="text-gray-400 text-xs">El PDF se descargó correctamente.</p></>}
+          {status === 'error'    && <><p className="text-red-400 font-semibold text-sm mb-1">Error al generar</p><p className="text-gray-400 text-xs">No se pudo generar el documento. Intenta de nuevo.</p></>}
+        </div>
+        {(listo || error) && (
+          <button onClick={onClose} className="mt-2 px-6 py-2 rounded-lg text-xs font-semibold"
+            style={{ background: listo ? '#06b6d4' : '#ef4444', color: '#000' }}>
+            Cerrar
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── ModalSeguimiento ──────────────────────────────────────────
 function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }) {
   const [form, setForm] = useState({

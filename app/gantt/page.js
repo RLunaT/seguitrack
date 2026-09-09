@@ -55,7 +55,7 @@ export default function GanttGeneralPage() {
   async function cargar() {
     const [{ data: o }, { data: m }, { data: c }, { data: cfg }] = await Promise.all([
       supabase.from('ots').select('*').order('fecha_inicio'),
-      supabase.from('modulos').select('*').eq('activo', true).order('orden'),
+      supabase.from('modulos').select('*').eq('activo', true).is('deleted_at', null).order('orden'),
       supabase.from('contratistas').select('*').eq('activo', true),
       supabase.from('config_global').select('*'),
     ])

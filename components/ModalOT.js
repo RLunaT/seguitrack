@@ -6,7 +6,7 @@ import { calcularCamposOT, calcularCamposConEficiencia, generarSemanas, getNombr
 // Nombre "familia" del módulo, sin el sufijo de período
 // (ej: "Contrastes de Medidores 2026-II" -> "Contrastes de Medidores")
 function nombreBase(nombre) {
-  return (nombre || '').replace(/\s*20\d{2}-(I{1,2})\s*$/i, '').trim()
+  return (nombre || '').replace(/\s*20\d{2}-[IVX]+\s*$/i, '').trim()
 }
 function claveGrupo(nombre) {
   return nombreBase(nombre).toLowerCase()
@@ -55,7 +55,7 @@ function StepIndicator({ step, total, labels }) {
   )
 }
 
-export default function ModalOT({ modulo, contratistas, camposExtra, actividades, motivos, periodo, ot, onClose, onSave, colsVisibles = {}, totalRegistros = 0 }) {
+export default function ModalOT({ modulo, contratistas, camposExtra, actividades, motivos, periodo, ot, onClose, onSave, onDocStatus, colsVisibles = {}, totalRegistros = 0 }) {
   const esEdicion    = !!ot
   const esOT         = modulo?.tipo === 'ot'
   const tieneOffsets = !!getOffsets(modulo)
@@ -108,14 +108,36 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
   // usuario creyera que ese texto ya estaba ahí y lo podía editar, pero el
   // value real era '' — al escribir, el campo pasaba a tener únicamente lo
   // tipeado. Acá precargamos esos defaults como valor real y editable.
-  function conDefaultsDocExtra(datos_extra, contratistaId) {
+  function defaultCumplimiento(motivo_ot) {
+    const m = (motivo_ot || '').toUpperCase().trim()
+    if (m === 'NTCSE RURAL')  return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Rural'
+    if (m === 'NTCSE URBANO') return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Urbano'
+    return modulo?.plantilla_cumplimiento || ''
+  }
+
+  function defaultTitulo(motivo_ot) {
+    const m = (motivo_ot || '').toUpperCase().trim()
+    if (m === 'NTCSE RURAL' || m === 'NTCSE URBANO') return ''
+    return modulo?.plantilla_titulo || ''
+  }
+
+  function calcPlazoEjecucion(fechaIni, fechaFin) {
+    if (!fechaIni || !fechaFin) return ''
+    const d1 = new Date(fechaIni + 'T00:00:00')
+    const d2 = new Date(fechaFin + 'T00:00:00')
+    if (isNaN(d1) || isNaN(d2)) return ''
+    const days = Math.round((d2 - d1) / 86400000) + 1
+    return String(days) + (days === 1 ? ' día' : ' días')
+  }
+
+  function conDefaultsDocExtra(datos_extra, contratistaId, motivo_ot) {
     if (!tienePlantilla) return datos_extra || {}
     const de  = { ...(datos_extra || {}) }
     const cId = contratistaId != null ? parseInt(contratistaId) : null
     const cnt = contratistas.find(c => c.id === cId)
     const defaults = {
-      doc_titulo:             modulo?.plantilla_titulo || '',
-      doc_cumplimiento:       modulo?.plantilla_cumplimiento || '',
+      doc_titulo:             defaultTitulo(motivo_ot),
+      doc_cumplimiento:       defaultCumplimiento(motivo_ot),
       doc_actividad:          modulo?.plantilla_actividad || '',
       doc_editado_por:        modulo?.plantilla_editado_por || '',
       doc_coordinador:        'CONSORCIO SUPERVISOR',
@@ -127,6 +149,11 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         if (defaults[k]) de[k] = defaults[k]
       }
     }
+    // Para NTCSE: si el título guardado es el de P-227, borrarlo
+    const m = (motivo_ot || '').toUpperCase().trim()
+    if ((m === 'NTCSE RURAL' || m === 'NTCSE URBANO') && de.doc_titulo === (modulo?.plantilla_titulo || '')) {
+      de.doc_titulo = ''
+    }
     return de
   }
 
@@ -137,8 +164,11 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
   // edite a mano.
   function conCodigoOTSemilla(de, semana) {
     if (!tienePlantilla) return de
-    if (de.doc_codigo_ot) { codigoAutoRef.current = null; return de }
-    const auto = generarCodigoOT(semana, periodo) || ''
+    const mx = (form.motivo_ot || '').toUpperCase().trim()
+    const esNTCSE = mx === 'NTCSE RURAL' || mx === 'NTCSE URBANO'
+    // Para NTCSE siempre regeneramos (el formato cambió y el guardado es obsoleto)
+    if (!esNTCSE && de.doc_codigo_ot) { codigoAutoRef.current = null; return de }
+    const auto = generarCodigoOT(semana, periodo, { motivo: form.motivo_ot, fechaInicio: form.fecha_inicio }) || ''
     if (!auto) return de
     codigoAutoRef.current = auto
     return { ...de, doc_codigo_ot: auto }
@@ -166,11 +196,11 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         cantidad_entregada:       ot.cantidad_entregada ?? '',
         val_penalidades_manual:   ot.val_penalidades_manual || '',
         observaciones:            ot.observaciones || '',
-        datos_extra:              conCodigoOTSemilla(conDefaultsDocExtra(ot.datos_extra, ot.contratista_id), semanaOt),
+        datos_extra:              conCodigoOTSemilla(conDefaultsDocExtra(ot.datos_extra, ot.contratista_id, ot.motivo_ot), semanaOt),
       })
     } else {
       setForm(prev => {
-        const de = conDefaultsDocExtra(prev.datos_extra, prev.contratista_id)
+        const de = conDefaultsDocExtra(prev.datos_extra, prev.contratista_id, prev.motivo_ot)
         return { ...prev, numero_registro: String(totalRegistros + 1), datos_extra: conCodigoOTSemilla(de, prev.semana) }
       })
     }
@@ -226,15 +256,49 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         u.semana = calcSemana(val)
       }
 
+      // Auto-poblar doc_dias_plazo con el cálculo real si el usuario no lo fijó a mano
+      if ((key === 'fecha_inicio' || key === 'fecha_fin_trabajos') && tienePlantilla) {
+        const fi = key === 'fecha_inicio' ? val : u.fecha_inicio
+        const ff = key === 'fecha_fin_trabajos' ? val : u.fecha_fin_trabajos
+        if (fi && ff && !u.datos_extra?.doc_dias_plazo) {
+          const d1 = new Date(fi + 'T00:00:00'), d2 = new Date(ff + 'T00:00:00')
+          if (!isNaN(d1) && !isNaN(d2)) {
+            const dias = Math.round((d2 - d1) / 86400000) + 1
+            u.datos_extra = { ...u.datos_extra, doc_dias_plazo: String(dias) }
+          }
+        }
+      }
+
       // Si la semana cambia (directo por el selector, o indirecto por fecha_inicio),
       // el código OT se vuelve a generar — pero solo si el usuario no lo
       // editó a mano (si lo editó, lo respetamos y no lo tocamos).
       if (key === 'semana' || (key === 'fecha_inicio' && val && u.semana !== prev.semana)) {
         const actual = u.datos_extra?.doc_codigo_ot || ''
-        if (!actual || actual === codigoAutoRef.current) {
-          const nuevoCodigo = generarCodigoOT(u.semana, periodo) || ''
+        const mxU = (u.motivo_ot || '').toUpperCase().trim()
+        const esNTCSE = mxU === 'NTCSE RURAL' || mxU === 'NTCSE URBANO'
+        if (esNTCSE || !actual || actual === codigoAutoRef.current) {
+          const nuevoCodigo = generarCodigoOT(u.semana, periodo, { motivo: u.motivo_ot, fechaInicio: u.fecha_inicio }) || ''
           codigoAutoRef.current = nuevoCodigo
           u.datos_extra = { ...u.datos_extra, doc_codigo_ot: nuevoCodigo }
+        }
+      }
+
+      // Al cambiar motivo_ot, actualizar doc_cumplimiento si aún tiene un valor
+      // por defecto conocido (no personalizado por el usuario).
+      if (key === 'motivo_ot' && tienePlantilla) {
+        const conocidos = [
+          'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Rural',
+          'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Urbano',
+          modulo?.plantilla_cumplimiento || '',
+        ].filter(Boolean)
+        const actual = u.datos_extra?.doc_cumplimiento || ''
+        if (!actual || conocidos.includes(actual)) {
+          u.datos_extra = { ...u.datos_extra, doc_cumplimiento: defaultCumplimiento(val) }
+        }
+        const tituloActual = u.datos_extra?.doc_titulo || ''
+        const tituloP227 = modulo?.plantilla_titulo || ''
+        if (!tituloActual || tituloActual === tituloP227) {
+          u.datos_extra = { ...u.datos_extra, doc_titulo: defaultTitulo(val) }
         }
       }
 
@@ -276,8 +340,10 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
         // el código OT se regenera salvo que el usuario lo haya editado a mano.
         if (semanaNueva !== prev.semana) {
           const actual = de.doc_codigo_ot || ''
-          if (!actual || actual === codigoAutoRef.current) {
-            const nuevoCodigo = generarCodigoOT(semanaNueva, periodo) || ''
+          const mxF = (u.motivo_ot || '').toUpperCase().trim()
+          const esNTCSEf = mxF === 'NTCSE RURAL' || mxF === 'NTCSE URBANO'
+          if (esNTCSEf || !actual || actual === codigoAutoRef.current) {
+            const nuevoCodigo = generarCodigoOT(semanaNueva, periodo, { motivo: u.motivo_ot, fechaInicio: u.fecha_inicio }) || ''
             codigoAutoRef.current = nuevoCodigo
             u.datos_extra = { ...de, doc_codigo_ot: nuevoCodigo }
           }
@@ -361,24 +427,26 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       return c.replace(/^contrato\s+/i, '').trim()
     }
 
+    const _off = getOffsets(modulo)
+    const fechaFinW = payload.fecha_fin_trabajos ||
+      (payload.fecha_inicio && _off ? addDays(payload.fecha_inicio, _off.fin) : '')
     const data = {
       numero_ot:          String(payload.numero_ot || payload.nr || ''),
       codigo_ot:          String(de.doc_codigo_ot || generarCodigoOT(payload.semana, periodo) || ''),
       contrato:           limpiarContrato(cont?.contrato || ''),
       fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || hoy),
       fecha_inicio:       fmtDia(payload.fecha_inicio),
-      fecha_fin:          fmtDia(payload.fecha_fin_trabajos),
+      fecha_fin:          fmtDia(fechaFinW),
       fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
-      // Plazo de ejecución para el documento: siempre inicia en 1 por defecto
-      // (no el cálculo real de dias_plazo, que puede ser 12+ días según las
-      // fechas) — el usuario puede editarlo manualmente con doc_dias_plazo.
+      fecha_inicio_raw:   payload.fecha_inicio || '',
+      fecha_fin_raw:      fechaFinW,
+      plazo_ejecucion:    calcPlazoEjecucion(payload.fecha_inicio, fechaFinW),
       dias_plazo:         String(de.doc_dias_plazo || '1'),
       cantidad:           String(payload.cantidad_programada || ''),
       actividad_doc:      de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
       actividad_label:    de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
       editado_por:        de.doc_editado_por  || modulo?.plantilla_editado_por || '',
-      cumplimiento:       de.doc_cumplimiento || modulo?.plantilla_cumplimiento || '',
-      titulo:             de.doc_titulo       || modulo?.plantilla_titulo || '',
+      cumplimiento:       de.doc_cumplimiento || defaultCumplimiento(payload.motivo_ot),
       coordinador:        de.doc_coordinador       || 'CONSORCIO SUPERVISOR',
       area_usuaria:       de.doc_area_usuaria      || 'ELECTROPUNO S.A.A',
       contratista_nombre: de.doc_contratista_firma || cont?.nombre || '',
@@ -388,8 +456,9 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       motivo_extra:       payload.motivo_ot || '',
     }
     try {
+      onDocStatus?.('word-gen')
       const res  = await fetch('/api/genword', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: form.modulo_id, actividad: payload.actividad, data }) })
-      if (!res.ok) { alert('Error al generar Word'); return }
+      if (!res.ok) { onDocStatus?.('error'); alert('Error al generar Word'); return }
       const blob = await res.blob()
 
       // Extrae el nombre real del archivo desde el header que envía la API.
@@ -412,7 +481,8 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       a.click()
       document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      onDocStatus?.('word-ok')
+    } catch(e) { onDocStatus?.('error'); alert('Error: ' + e.message) }
   }
 
   // Genera y descarga el PDF — misma data de origen y mismo manejo de
@@ -440,21 +510,26 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       return c.replace(/^contrato\s+/i, '').trim()
     }
 
+    const _off2 = getOffsets(modulo)
+    const fechaFinP = payload.fecha_fin_trabajos ||
+      (payload.fecha_inicio && _off2 ? addDays(payload.fecha_inicio, _off2.fin) : '')
     const data = {
       numero_ot:          String(payload.numero_ot || payload.nr || ''),
       codigo_ot:          String(de.doc_codigo_ot || generarCodigoOT(payload.semana, periodo) || ''),
       contrato:           limpiarContrato(cont?.contrato || ''),
       fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || hoy),
       fecha_inicio:       fmtDia(payload.fecha_inicio),
-      fecha_fin:          fmtDia(payload.fecha_fin_trabajos),
+      fecha_fin:          fmtDia(fechaFinP),
       fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
+      fecha_inicio_raw:   payload.fecha_inicio || '',
+      fecha_fin_raw:      fechaFinP,
+      plazo_ejecucion:    calcPlazoEjecucion(payload.fecha_inicio, fechaFinP),
       dias_plazo:         String(de.doc_dias_plazo || '1'),
       cantidad:           String(payload.cantidad_programada || ''),
       actividad_doc:      de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
       actividad_label:    de.doc_actividad    || modulo?.plantilla_actividad || payload.actividad || '',
       editado_por:        de.doc_editado_por  || modulo?.plantilla_editado_por || '',
-      cumplimiento:       de.doc_cumplimiento || modulo?.plantilla_cumplimiento || '',
-      titulo:             de.doc_titulo       || modulo?.plantilla_titulo || '',
+      cumplimiento:       de.doc_cumplimiento || defaultCumplimiento(payload.motivo_ot),
       coordinador:        de.doc_coordinador       || 'CONSORCIO SUPERVISOR',
       area_usuaria:       de.doc_area_usuaria      || 'ELECTROPUNO S.A.A',
       contratista_nombre: de.doc_contratista_firma || cont?.nombre || '',
@@ -464,8 +539,9 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       motivo_extra:       payload.motivo_ot || '',
     }
     try {
+      onDocStatus?.('pdf-gen')
       const res = await fetch('/api/genpdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modulo_id: form.modulo_id, actividad: payload.actividad, data }) })
-      if (!res.ok) { const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
+      if (!res.ok) { onDocStatus?.('error'); const e = await res.json().catch(()=>({})); alert('Error: ' + (e.error || res.statusText)); return }
       const arrayBuffer = await res.arrayBuffer()
       const blob = new Blob([arrayBuffer], { type: 'application/pdf' })
 
@@ -482,7 +558,8 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       a.click()
       document.body.removeChild(a)
       setTimeout(() => URL.revokeObjectURL(url), 10000)
-    } catch(e) { alert('Error: ' + e.message) }
+      onDocStatus?.('pdf-ok')
+    } catch(e) { onDocStatus?.('error'); alert('Error: ' + e.message) }
   }
 
   const cont = contratistas.find(c => c.id === parseInt(form.contratista_id))
@@ -708,14 +785,9 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   <p className="text-xs text-gray-500 mb-2">Estos datos se usarán para generar el documento Word. Puedes dejar los campos vacíos para usar los valores del módulo.</p>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2">
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Título del documento</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_titulo} name="p3_doc_titulo" autoComplete="off"
-                        value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)}/>
-                    </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label>
-                      <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} name="p3_doc_codigo_ot" autoComplete="off"
+                      <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo, { motivo: form.motivo_ot, fechaInicio: form.fecha_inicio }) || 'EPU07IP26'} name="p3_doc_codigo_ot" autoComplete="off"
                         value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/>
                     </div>
                     <div>
@@ -907,8 +979,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                 <section>
                   <h3 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-3">📄 Documento Word</h3>
                   <div className="grid grid-cols-2 gap-3 p-4 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
-                    <div className="col-span-2"><label className="text-xs font-semibold text-gray-400 block mb-1">Título</label><input className="input-base" placeholder={modulo?.plantilla_titulo} value={form.datos_extra['doc_titulo']||''} onChange={e=>setExtra('doc_titulo',e.target.value)} name="st_doc_titulo" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)} name="st_doc_codigo_ot" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo, { motivo: form.motivo_ot, fechaInicio: form.fecha_inicio }) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)} name="st_doc_codigo_ot" autoComplete="off"/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label><input className="input-base" type="number" placeholder="1" value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)} name="st_doc_dias_plazo" autoComplete="off"/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label><input className="input-base" placeholder={modulo?.plantilla_cumplimiento} value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)} name="st_doc_cumplimiento" autoComplete="off"/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en doc.</label><input className="input-base" placeholder={modulo?.plantilla_actividad} value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)} name="st_doc_actividad" autoComplete="off"/></div>

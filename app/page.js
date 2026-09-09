@@ -1005,7 +1005,7 @@ export default function DashboardPage() {
     setLoading(true)
     const [{ data: ots }, { data: modulos }, { data: conts }, { data: cfg }, { data: metasData }] = await Promise.all([
       supabase.from('ots').select('*').order('fecha_limite_expedientes'),
-      supabase.from('modulos').select('*').eq('activo', true).order('orden'),
+      supabase.from('modulos').select('*').eq('activo', true).is('deleted_at', null).order('orden'),
       supabase.from('contratistas').select('*').eq('activo', true),
       supabase.from('config_global').select('*'),
       supabase.from('metas').select('*'),

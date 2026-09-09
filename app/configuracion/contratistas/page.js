@@ -32,7 +32,7 @@ export default function ContratistasPage() {
   async function cargar() {
     const [{ data: cs }, { data: ms }, { data: rels }, { data: hist }] = await Promise.all([
       supabase.from('contratistas').select('*').eq('activo', true).order('nombre'),
-      supabase.from('modulos').select('id,nombre,icono,tipo,periodo,orden').eq('activo', true).order('orden'),
+      supabase.from('modulos').select('id,nombre,icono,tipo,periodo,orden').eq('activo', true).is('deleted_at', null).order('orden'),
       supabase.from('contratista_modulos').select('id, contratista_id, modulo_id, orden'),
       supabase.from('contratos_historial').select('*').order('fecha_inicio', { ascending: false, nullsFirst: false }),
     ])

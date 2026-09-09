@@ -56,6 +56,7 @@ function SidebarInner({ mobileOpen, onMobileClose, theme, onToggleTheme }) {
       .from('modulos')
       .select('id, nombre, icono, color, periodo, tipo, anio')
       .eq('activo', true)
+      .is('deleted_at', null)
       .order('orden')
 
     // Períodos desde OTs
@@ -109,11 +110,17 @@ function SidebarInner({ mobileOpen, onMobileClose, theme, onToggleTheme }) {
   }
 
   async function eliminarPeriodo(p) {
-    if (!confirm(`¿Eliminar el período ${p}? Se eliminarán también sus módulos (no las OTs).`)) return
-    
-    // Eliminar módulos de ese período
-    await supabase.from('modulos').delete().eq('periodo', p)
-    
+    if (!confirm(`¿Mover el período ${p} a la papelera? Sus módulos y OTs se podrán restaurar durante 10 días.`)) return
+
+    // Soft-delete módulos y sus OTs
+    const { data: modsPeriodo } = await supabase.from('modulos').select('id').eq('periodo', p).is('deleted_at', null)
+    const ahora = new Date().toISOString()
+    if (modsPeriodo?.length) {
+      const ids = modsPeriodo.map(m => m.id)
+      await supabase.from('ots').update({ deleted_at: ahora }).in('modulo_id', ids).is('deleted_at', null)
+      await supabase.from('modulos').update({ deleted_at: ahora }).in('id', ids)
+    }
+
     // Quitar de config_global
     const nuevosPeriodos = periodos.filter(x => x !== p)
     await supabase

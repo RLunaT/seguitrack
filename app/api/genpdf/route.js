@@ -28,32 +28,106 @@ function escapeXml(str) {
 }
 
 function fixSplitPlaceholders(xml) {
+  const PROOF = '(?:<w:proofErr[^/]*/>)*'
+  const RUN_OPT_RPR = '<w:r[^>]*>(?:<w:rPr>[\\s\\S]*?<\\/w:rPr>)?'
+
+  // Caso 1: { en un w:t, key en otro, } en otro
   xml = xml.replace(
-    /<w:t>\{<\/w:t><\/w:r>(?:<w:proofErr[^\/]*\/>)?<w:r[^>]*>(?:<w:rPr>.*?<\/w:rPr>)?<w:t>([a-z]{1,6})<\/w:t><\/w:r>(?:<w:proofErr[^\/]*\/>)?<w:r[^>]*>(?:<w:rPr>.*?<\/w:rPr>)?<w:t>\}<\/w:t>/gs,
+    new RegExp(
+      `<w:t>\\{<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>([a-z0-9]{1,6})<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>\\}<\\/w:t>`,
+      'gs'
+    ),
     '<w:t>{$1}</w:t>'
   )
+
+  // Caso 2: texto"{ en un w:t, key en otro, }" en otro
   xml = xml.replace(
-    /(<w:t[^>]*>[^<]*)\{(<\/w:t><\/w:r>(?:<w:proofErr[^\/]*\/>)?<w:r[^>]*>(?:<w:rPr>.*?<\/w:rPr>)?<w:t>)([a-z]{1,6})(<\/w:t><\/w:r>(?:<w:proofErr[^\/]*\/>)?<w:r[^>]*>(?:<w:rPr>.*?<\/w:rPr>)?<w:t>)\}([^<]*<\/w:t>)/gs,
-    (match, pre, sep1, key, sep2, post) => `${pre}{${key}}${post.replace(/^/, '')}`
+    new RegExp(
+      `(<w:t[^>]*>[^<]*)\\{(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)([a-z0-9]{1,6})(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)\\}([^<]*<\\/w:t>)`,
+      'gs'
+    ),
+    (match, pre, sep1, key, sep2, post) => `${pre}{${key}}${post}`
   )
+
+  // Caso 3: {part1 en w:t, part2 en otro, } en tercero
   xml = xml.replace(
-    /\{((?:<(?!w:t)[^>]+>\s*)*)<w:t[^>]*>([a-z]{1,6})<\/w:t>((?:\s*<(?!w:t)[^>]+>)*)\}/gs,
-    (match, pre, key, post) => '{' + key + '}'
+    new RegExp(
+      `(<w:t[^>]*>[^<]*)\\{([a-z0-9]{1,5})(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)([a-z0-9]{1,5})(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)\\}([^<]*<\\/w:t>)`,
+      'gs'
+    ),
+    (match, pre, p1, sep1, p2, sep2, post) => {
+      const key = p1 + p2
+      return key.length <= 6 ? `${pre}{${key}}${post}` : match
+    }
   )
+
+  // Caso 4: { en w:t, part1 en otro, part2} en tercero
+  xml = xml.replace(
+    new RegExp(
+      `(<w:t[^>]*>[^<]*)\\{(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)([a-z0-9]{1,5})(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)([a-z0-9]{1,5})\\}([^<]*<\\/w:t>)`,
+      'gs'
+    ),
+    (match, pre, sep1, p1, sep2, p2, post) => {
+      const key = p1 + p2
+      return key.length <= 6 ? `${pre}{${key}}${post}` : match
+    }
+  )
+
+  // Caso 5: {key en un w:t, } en el siguiente
+  xml = xml.replace(
+    new RegExp(
+      `(<w:t[^>]*>[^<]*)\\{([a-z0-9]{1,6})(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)\\}([^<]*<\\/w:t>)`,
+      'gs'
+    ),
+    (match, pre, key, sep, post) => `${pre}{${key}}${post}`
+  )
+
+  // Caso 6: { en un w:t, key} en el siguiente
+  xml = xml.replace(
+    new RegExp(
+      `(<w:t[^>]*>[^<]*)\\{(<\\/w:t><\\/w:r>${PROOF}${RUN_OPT_RPR}<w:t>)([a-z0-9]{1,6})\\}([^<]*<\\/w:t>)`,
+      'gs'
+    ),
+    (match, pre, sep, key, post) => `${pre}{${key}}${post}`
+  )
+
+  return xml
+}
+
+// Preprocesa el XML del .docx antes de enviarlo a LibreOffice/Gotenberg.
+// Corrige tres comportamientos distintos de LibreOffice vs Word:
+//   1) w:color con temas — LibreOffice los ignora y muestra negro; se eliminan
+//      para que el texto herede el color predeterminado limpiamente.
+//   2) w:trHeight — Word los trata como sugerencia, LibreOffice como mínimo
+//      estricto; con contenido de fuente diferente esto expande las filas y
+//      desborda a una segunda página.
+//   3) w:after excesivo — LibreOffice añade padding extra entre párrafos;
+//      se limita a 60 twips (≈3 pt) para evitar overflow.
+function optimizarParaLibreOffice(xml) {
+  // Quita solo los atributos de TEMA de las etiquetas <w:color> — LibreOffice
+  // ignora w:themeColor/Tint/Shade y puede rendir el texto en negro en vez del
+  // color original. Al quitar esos atributos, LibreOffice usa el valor hex
+  // explícito (w:val) que Word también usa como fallback, incluyendo rojo (FF0000).
+  xml = xml.replace(/\s+w:themeColor="[^"]+"/g, '')
+  xml = xml.replace(/\s+w:themeTint="[^"]+"/g, '')
+  xml = xml.replace(/\s+w:themeShade="[^"]+"/g, '')
+
+  // Quita alturas fijas de fila — LibreOffice las trata como mínimos estrictos
+  // (Word las toma como guía), lo que desborda contenido a una 2ª página.
+  xml = xml.replace(/<w:trHeight[^/]*\/>/g, '')
+
+  // Limita espaciado after de párrafo — LibreOffice agrega padding extra.
+  xml = xml.replace(/w:after="(\d+)"/g, (m, val) => parseInt(val) > 80 ? 'w:after="40"' : m)
+
   return xml
 }
 
 function replaceAll(xml, data) {
-  let result = fixSplitPlaceholders(xml)
+  let result = optimizarParaLibreOffice(fixSplitPlaceholders(xml))
   for (const [key, value] of Object.entries(data)) {
     const tag = '{' + key + '}'
     result = result.split(tag).join(escapeXml(value))
   }
-  // Defensivo: ver mismo comentario en genword/route.js — algunas
-  // plantillas .docx traen el color azul (0000FF) puesto a mano en los
-  // runs de cumplimiento/actividad/editado por. Se limpia acá también
-  // para no depender de que el .docx en disco esté actualizado.
-  result = result.replace(/<w:color w:val="0000FF"\s*\/>/g, '')
   return result
 }
 
@@ -134,18 +208,20 @@ function construirNombreArchivo(data, actividad) {
 //   BOX_TOP    =  38   distancia desde el borde superior de la página
 const FECHA_LEFT   = 504
 const FECHA_RIGHT  = 758
-const BOX_HEIGHT   = 28
-const BOX_TOP      = 38
-const CONTRATO_GAP = 12    // gap entre borde inferior caja y texto Contrato
+const BOX_HEIGHT   = 22
+const BOX_TOP      = 55
+const CONTRATO_GAP = 1     // gap entre borde inferior caja y texto Contrato
 const FONT_BOX     = 10.5
 const FONT_CONTRATO = 9
 
-async function aplicarOverlay(pdfBuffer, modulo_id, data, logoJpegBuffer) {
-  // El overlay solo se aplica a módulos 1 (Contrastes) y 3 (Reemplazo).
-  // Cualquier otro módulo (Avisos u otros) recibe el PDF tal como lo
-  // entrega Gotenberg, sin modificar.
+async function aplicarOverlay(pdfBuffer, templateName, modulo_id, data, logoJpegBuffer) {
+  // El overlay aplica a todos los módulos de Contrastes (cualquier semestre)
+  // y a Reemplazo. Se detecta por el nombre del template, no por modulo_id,
+  // para cubrir todos los semestres sin hardcodear IDs.
+  const esContrastes = templateName && templateName.includes('contrastes')
+  const esReemplazo  = templateName && templateName.includes('reemplazo')
+  if (!esContrastes && !esReemplazo) return pdfBuffer
   const mid = Number(modulo_id)
-  if (mid !== 1 && mid !== 3) return pdfBuffer
 
   const pdfDoc = await PDFDocument.load(pdfBuffer)
   const page   = pdfDoc.getPages()[0]
@@ -175,7 +251,7 @@ async function aplicarOverlay(pdfBuffer, modulo_id, data, logoJpegBuffer) {
   //    (logoY y h son iguales en ambos — solo varía el x levemente)
   if (logoJpegBuffer) {
     try {
-      const logoX = mid === 3 ? 43.15 : 36.8
+      const logoX = esReemplazo ? 43.15 : 36.8
       const logoY = 536.2   // desde el borde inferior de la página (pdf-lib)
       const logoW = 221.25
       const logoH = 29.85
@@ -208,21 +284,27 @@ async function aplicarOverlay(pdfBuffer, modulo_id, data, logoJpegBuffer) {
   //               = 546 − 12 − 9 − 4 = 521 pt
   //    (vs. height−100 = 512 pt del código anterior: 9 pt más alto, suficiente
   //    para no tapar la primera línea del título en layouts comprimidos)
-  const wipeBottom = boxBottomY - CONTRATO_GAP - FONT_CONTRATO - 4
+  // wipeBottom fijo en 521: cubre el "Contrato N.°" que Gotenberg pone en y≈525
+  // pero se detiene antes del título (que empieza en y≈515 desde la base).
+  // Usar la fórmula dinámica aquí baja demasiado y tapa el título.
+  const wipeBottom = 521
   page.drawRectangle({
-    x:      FECHA_LEFT - 5,          // 5 pt a la izquierda de la caja
+    x:      499,
     y:      wipeBottom,
-    width:  width - (FECHA_LEFT - 5),
+    width:  width - 499,
     height: height - wipeBottom,
     color:  rgb(1, 1, 1),
   })
 
-  // ── 2) Caja exterior ────────────────────────────────────────────────────
+  // ── 2) Caja exterior con relleno blanco ────────────────────────────────
+  // El fill blanco asegura que no quede ningún texto de Gotenberg visible
+  // dentro de la caja, aunque el wipe no lo haya cubierto completamente.
   page.drawRectangle({
     x:           FECHA_LEFT,
     y:           boxBottomY,
     width:       boxWidth,
     height:      BOX_HEIGHT,
+    color:       rgb(1, 1, 1),
     borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   })
@@ -235,12 +317,17 @@ async function aplicarOverlay(pdfBuffer, modulo_id, data, logoJpegBuffer) {
     thickness: 1,
   })
 
-  // ── 4) Celda izquierda "O.T. N°X" — centrada ───────────────────────────
+  // ── 4) Celda izquierda "O.T. N°X" — centrado vertical ─────────────────
+  // y = línea base. Cap height ≈ 72 % del tamaño de fuente (Helvetica Bold).
+  // Para centrar visualmente las mayúsculas: (BOX_HEIGHT − capH) / 2.
+  const capH  = FONT_BOX * 0.72
+  const textY = boxBottomY + (BOX_HEIGHT - capH) / 2
+
   const labelOT = `O.T. N°${data.ot || ''}`
   const wOT     = fontBold.widthOfTextAtSize(labelOT, FONT_BOX)
   page.drawText(labelOT, {
     x:    FECHA_LEFT + (cellLeft - wOT) / 2,
-    y:    boxBottomY + (BOX_HEIGHT - FONT_BOX) / 2,
+    y:    textY,
     size: FONT_BOX,
     font: fontBold,
     color: rgb(0, 0, 0),
@@ -251,14 +338,16 @@ async function aplicarOverlay(pdfBuffer, modulo_id, data, logoJpegBuffer) {
   const wCod     = fontBold.widthOfTextAtSize(labelCod, FONT_BOX)
   page.drawText(labelCod, {
     x:    dividerX + (cellRight - wCod) / 2,
-    y:    boxBottomY + (BOX_HEIGHT - FONT_BOX) / 2,
+    y:    textY,
     size: FONT_BOX,
     font: fontBold,
     color: rgb(0, 0, 0),
   })
 
   // ── 6) "Contrato N.° ..." — centrado bajo la caja ──────────────────────
-  const contratoTxt = `Contrato ${data.ct || ''}`
+  // ct ya llega sin prefijo "N.°" (strippeado en la preparación de datos),
+  // así que el overlay lo reconstruye con el formato correcto.
+  const contratoTxt = data.ct ? `Contrato N.° ${data.ct}` : 'Contrato'
   const wContrato   = fontReg.widthOfTextAtSize(contratoTxt, FONT_CONTRATO)
   page.drawText(contratoTxt, {
     x:    FECHA_LEFT + (boxWidth - wContrato) / 2,
@@ -277,20 +366,54 @@ export async function POST(request) {
     const body = await request.json()
     const { actividad, modulo_id, data: rawData } = body
 
+    const esContraste = Number(modulo_id) === 1 || actividad === 'Contraste' || actividad === 'Contrastes'
+    const plazoCalculado = (() => {
+      const fi = rawData.fecha_inicio_raw, ff = rawData.fecha_fin_raw
+      if (!fi || !ff) return ''
+      const clean = s => s.slice(0, 10)
+      const d1 = new Date(clean(fi) + 'T00:00:00'), d2 = new Date(clean(ff) + 'T00:00:00')
+      if (isNaN(d1) || isNaN(d2)) return ''
+      const days = Math.round((d2 - d1) / 86400000) + 1
+      return String(days) + (days === 1 ? ' día' : ' días')
+    })()
     const data = {
       ot:  rawData.numero_ot          || '',
-      sk:  rawData.codigo_ot          || rawData.numero_ot || '',
+      sk:  (() => {
+             const mx = (rawData.motivo_extra || rawData.motivo_ot || '').toUpperCase().trim()
+             if (mx === 'NTCSE RURAL' || mx === 'NTCSE URBANO') {
+               const fi = rawData.fecha_inicio_raw || ''
+               const mes = fi
+                 ? String(new Date(fi.slice(0, 10) + 'T12:00:00').getMonth() + 1).padStart(2, '0')
+                 : '00'
+               const sem = ((rawData.semana || '').match(/\d+/) || ['00'])[0].padStart(2, '0')
+               const letra = mx === 'NTCSE URBANO' ? 'U' : 'R'
+               return `EPUA${mes}-${letra}${sem}`
+             }
+             return rawData.codigo_ot || rawData.numero_ot || ''
+           })(),
       t1:  rawData.fecha_inicio       || '',
       t2:  rawData.fecha_fin          || '',
       t3:  rawData.fecha_limite       || '',
-      pz:  rawData.dias_plazo         || '1',
+      pz:  esContraste
+             ? (plazoCalculado || rawData.plazo_ejecucion || '')
+             : (rawData.dias_plazo || ''),
       cn:  rawData.cantidad           || '',
       ac:  rawData.actividad_doc      || rawData.actividad_label || '',
       te:  rawData.fecha_entrega      || '',
-      ct:  rawData.contrato           || '',
-      cm:  rawData.cumplimiento       || 'RESOLUCIÓN N° 227-2013-OS/CD',
+      ct:  (rawData.contrato || '').replace(/^contrato\s+/i, '').replace(/^N[.]?[°º]\s*/i, '').trim(),
+      cm:  rawData.cumplimiento       || (() => {
+             const m = (rawData.motivo_extra || rawData.motivo_ot || '').toUpperCase().trim()
+             if (m === 'NTCSE RURAL')   return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Rural'
+             if (m === 'NTCSE URBANO')  return 'RESOLUCIÓN 496-2005-MEN/DM y NTCSE Urbano'
+             return 'RESOLUCIÓN N° 227-2013-OS/CD'
+           })(),
       av:  rawData.actividad_label    || '',
-      ed:  rawData.editado_por        || '',
+      ed:  (() => {
+             const mx = (rawData.motivo_extra || rawData.motivo_ot || '').toUpperCase().trim()
+             if (mx === 'NTCSE RURAL' || mx === 'NTCSE URBANO')
+               return 'ESPECIALISTA DE MANTENIMIENTO DE CONEXIONES'
+             return rawData.editado_por || ''
+           })(),
       cr:  rawData.coordinador        || 'CONSORCIO SUPERVISOR',
       co:  rawData.contratista_nombre || '',
       mx:  rawData.motivo_extra       || rawData.motivo_ot || '',
@@ -298,17 +421,20 @@ export async function POST(request) {
       periodo:  rawData.periodo  || '',
     }
 
-    // Mismo mapeo de plantillas que usa Word — para que ambos elijan
-    // siempre el mismo documento base para la misma OT.
+    // Mismo mapeo de plantillas que usa Word — seleccionar NTCSE según motivo_ot
     const TEMPLATE_POR_MODULO = {
-      1: 'template_contrastes.docx',
       2: 'template_avisos.docx',
       3: 'template_reemplazo.docx',
     }
     let templateName = TEMPLATE_POR_MODULO[modulo_id]
+    if (Number(modulo_id) === 1 || actividad === 'Contraste' || actividad === 'Contrastes') {
+      const motivo = (rawData.motivo_extra || rawData.motivo_ot || '').toUpperCase().trim()
+      if (motivo === 'NTCSE RURAL') templateName = 'template_contrastes_ntcse_rural.docx'
+      else if (motivo === 'NTCSE URBANO') templateName = 'template_contrastes_ntcse_urbano.docx'
+      else templateName = 'template_contrastes.docx'
+    }
     if (!templateName) {
-      if (actividad === 'Contraste' || actividad === 'Contrastes') templateName = 'template_contrastes.docx'
-      else if (actividad === 'Avisos') templateName = 'template_avisos.docx'
+      if (actividad === 'Avisos') templateName = 'template_avisos.docx'
       else if (actividad === 'Reemplazo') templateName = 'template_reemplazo.docx'
     }
     if (!templateName) {
@@ -380,7 +506,7 @@ export async function POST(request) {
         logoJpeg = zip.files['word/media/image1.jpg']?.asBinary()
         if (logoJpeg) logoJpeg = Buffer.from(logoJpeg, 'binary')
       } catch (_) {}
-      pdfBuffer = await aplicarOverlay(pdfBuffer, modulo_id, data, logoJpeg)
+      pdfBuffer = await aplicarOverlay(pdfBuffer, templateName, modulo_id, data, logoJpeg)
     } catch (err) {
       console.error('[genpdf] Error al aplicar el overlay (se entrega el PDF sin overlay):', err)
     }
