@@ -51,8 +51,8 @@ const CAMPOS_BASE = [
   { key: 'fecha_limite',       label: 'F. Límite',       always: true  },
   { key: 'dias_plazo',         label: 'Plazo',           always: false },
   { key: 'cantidad',           label: 'Cant. Prog.',     always: true  },
-  { key: 'fecha_reporte',      label: 'F. Reporte',      always: false },
-  { key: 'cantidad_entregada', label: 'Cant. Ent.',      always: false },
+  { key: 'fecha_reporte',      label: 'F. Reporte',      always: true  },
+  { key: 'cantidad_entregada', label: 'Cant. Ent.',      always: true  },
   { key: 'estado',             label: 'Estado',          always: true  },
   { key: 'duracion_real',      label: 'Dur. Real',       always: false },
   { key: 'dias_fuera',         label: 'D. Fuera',        always: false },
@@ -110,8 +110,9 @@ export default function ModuloPage() {
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editando, setEditando] = useState(null)
-  const [modalSeg, setModalSeg]   = useState(false)
-  const [otSeg, setOtSeg]         = useState(null)
+  const [modalSeg, setModalSeg]     = useState(false)
+  const [modalSegMode, setModalSegMode] = useState('reportar') // 'reportar' | 'fecha' | 'cantidad'
+  const [otSeg, setOtSeg]           = useState(null)
   const [modalSegInst, setModalSegInst] = useState(false)
   const [segActSelec, setSegActSelec]   = useState(null) // 'fact' | 'inst'
   const [segFecha, setSegFecha]         = useState('')
@@ -804,7 +805,7 @@ export default function ModuloPage() {
     if (c.key === 'motivo_ot')   return esOT
     if (c.key === 'contrato')    return esOT
     if (c.key === 'accion_doc')  return esOT && tienePlantilla
-    if (c.key === 'cantidad_entregada') return [1,2,3].includes(parseInt(id))
+    if (c.key === 'cantidad_entregada') return true
     return true
   }).filter(c => isColVisible(c.key))
 
@@ -1267,15 +1268,43 @@ export default function ModuloPage() {
                                 if (k === 'cantidad') return <td key={k} className="text-center text-xs">{ot.cantidad_programada??'—'}</td>
                                 if (k === 'cantidad_entregada') {
                                   const prog = ot.cantidad_programada > 0 && ot.cantidad_entregada !== null ? Math.round(ot.cantidad_entregada / ot.cantidad_programada * 100) : null
-                                  return <td key={k} className="text-center text-xs"><span>{ot.cantidad_entregada??'—'}</span>{prog!==null&&<span className="ml-1 text-xs font-mono" style={{color:prog>=100?'#22c55e':prog>=80?'#eab308':'#ef4444'}}>({prog}%)</span>}</td>
+                                  if (!ot.fecha_reporte) return <td key={k} className="text-center text-xs text-gray-700" style={{padding:'2px 8px'}}>—</td>
+                                  const progColor = prog===null ? '#6b7280' : prog>=100 ? '#22c55e' : prog>=80 ? '#eab308' : '#ef4444'
+                                  const sinCantidad = ot.cantidad_entregada === null || ot.cantidad_entregada === undefined
+                                  return (
+                                    <td key={k} style={{padding:'2px 6px'}}>
+                                      <button
+                                        onClick={() => { setOtSeg(ot); setModalSegMode('cantidad'); setModalSeg(true) }}
+                                        title="Editar cantidad entregada"
+                                        style={{
+                                          display:'inline-flex', alignItems:'center', gap:5,
+                                          background: sinCantidad ? 'rgba(234,179,8,0.08)' : 'rgba(255,255,255,0.04)',
+                                          border: sinCantidad ? '1px dashed rgba(234,179,8,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                                          borderRadius:6, cursor:'pointer', padding:'2px 7px',
+                                          transition:'all 0.15s',
+                                        }}
+                                        onMouseEnter={e=>{ e.currentTarget.style.background=sinCantidad?'rgba(234,179,8,0.15)':'rgba(255,255,255,0.09)'; e.currentTarget.style.borderColor=sinCantidad?'rgba(234,179,8,0.7)':'rgba(255,255,255,0.22)' }}
+                                        onMouseLeave={e=>{ e.currentTarget.style.background=sinCantidad?'rgba(234,179,8,0.08)':'rgba(255,255,255,0.04)'; e.currentTarget.style.borderColor=sinCantidad?'rgba(234,179,8,0.4)':'rgba(255,255,255,0.08)' }}
+                                      >
+                                        {sinCantidad ? (
+                                          <span style={{fontSize:10,color:'#ca8a04',fontWeight:500}}>+ cant.</span>
+                                        ) : (
+                                          <>
+                                            <span className="font-mono text-xs" style={{color:'#e2e8f0'}}>{ot.cantidad_entregada}</span>
+                                            {prog!==null && <span className="font-mono" style={{fontSize:10,color:progColor}}>({prog}%)</span>}
+                                          </>
+                                        )}
+                                      </button>
+                                    </td>
+                                  )
                                 }
                                 if (k === 'fecha_reporte') {
                                   const colorEstado = {1:'#22c55e',2:'#f97316',3:'#60a5fa',4:'#eab308',5:'#ef4444'}[ot.estado]||'#6b7280'
                                   return (
                                     <td key={k} style={{padding:'2px 8px'}}>
                                       <button
-                                        onClick={() => { setOtSeg(ot); setModalSeg(true) }}
-                                        title="Registrar seguimiento"
+                                        onClick={() => { setOtSeg(ot); setModalSegMode(ot.fecha_reporte ? 'fecha' : 'reportar'); setModalSeg(true) }}
+                                        title={ot.fecha_reporte ? 'Editar fecha de reporte' : 'Registrar seguimiento'}
                                         style={{display:'inline-flex',alignItems:'center',gap:5,background:'transparent',border:'none',cursor:'pointer',padding:'2px 4px',borderRadius:4,transition:'opacity 0.15s'}}
                                         onMouseEnter={e => e.currentTarget.style.opacity='0.7'}
                                         onMouseLeave={e => e.currentTarget.style.opacity='1'}
@@ -1737,6 +1766,7 @@ export default function ModuloPage() {
           modulo={modulo}
           contratistas={contratistas}
           periodo={periodo}
+          mode={modalSegMode}
           onClose={() => { setModalSeg(false); setOtSeg(null) }}
           onSave={() => { setModalSeg(false); setOtSeg(null); cargar() }} />
       )}
@@ -2353,7 +2383,7 @@ function DashboardModulo({ ots, contratistas, modulo }) {
   )
 }
 // ── ModalSeguimiento ──────────────────────────────────────────
-function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }) {
+function ModalSeguimiento({ ot, modulo, contratistas, periodo, mode = 'reportar', onClose, onSave }) {
   const [form, setForm] = useState({
     fecha_reporte:          ot.fecha_reporte || '',
     cantidad_entregada:     ot.cantidad_entregada ?? '',
@@ -2365,8 +2395,16 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
 
   const cont          = contratistas.find(c => c.id === ot.contratista_id)
   const esOTmodulo    = modulo?.tipo === 'ot'
-  const tieneCantidad = [1,2,3].includes(modulo?.id) && ot.cantidad_programada > 0
+  const tieneCantidad = ot.cantidad_programada > 0
   const idLabel       = esOTmodulo ? `OT #${ot.numero_ot || ot.numero_registro}` : `Reg. #${ot.numero_registro}`
+
+  // Visibility by mode
+  const mostrarFecha    = mode === 'reportar' || mode === 'fecha'
+  const mostrarCantidad = tieneCantidad && (mode === 'reportar' || mode === 'cantidad')
+
+  const tituloModal = mode === 'fecha' ? '📅 Editar fecha de reporte'
+    : mode === 'cantidad' ? '📦 Editar cantidad entregada'
+    : '📊 Registrar seguimiento'
 
   const pctCant = tieneCantidad && form.cantidad_entregada !== ''
     ? Math.min(200, Math.round(parseInt(form.cantidad_entregada) / ot.cantidad_programada * 100))
@@ -2383,15 +2421,17 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
   }
 
   async function guardar() {
-    if (!form.fecha_reporte) { setError('La fecha de reporte es requerida.'); return }
+    if (mostrarFecha && !form.fecha_reporte) { setError('La fecha de reporte es requerida.'); return }
+    if (mode === 'cantidad' && form.cantidad_entregada === '') { setError('Ingresa la cantidad entregada.'); return }
     setSaving(true)
-    const { error: err } = await supabase.from('ots').update({
-      fecha_reporte:          form.fecha_reporte || null,
-      cantidad_entregada:     form.cantidad_entregada !== '' ? parseInt(form.cantidad_entregada) : null,
-      val_penalidades_manual: form.val_penalidades_manual ? parseFloat(form.val_penalidades_manual) : 0,
-      observaciones:          form.observaciones || null,
-      actualizado_en:         new Date().toISOString(),
-    }).eq('id', ot.id)
+    const updates = { actualizado_en: new Date().toISOString() }
+    if (mostrarFecha) updates.fecha_reporte = form.fecha_reporte || null
+    if (mostrarCantidad) updates.cantidad_entregada = form.cantidad_entregada !== '' ? parseInt(form.cantidad_entregada) : null
+    if (mode === 'reportar') {
+      updates.val_penalidades_manual = form.val_penalidades_manual ? parseFloat(form.val_penalidades_manual) : 0
+      updates.observaciones = form.observaciones || null
+    }
+    const { error: err } = await supabase.from('ots').update(updates).eq('id', ot.id)
     if (err) { setError(err.message); setSaving(false); return }
     onSave()
   }
@@ -2401,7 +2441,7 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
       <div className="modal-box" style={{ maxWidth: 480 }}>
         <div style={{ background: '#1d4ed8', borderRadius: '12px 12px 0 0', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div className="text-sm font-bold text-white">📊 Registrar seguimiento</div>
+            <div className="text-sm font-bold text-white">{tituloModal}</div>
             <div className="text-xs mt-0.5" style={{ color: '#bfdbfe' }}>
               {idLabel} · {modulo?.icono} {modulo?.nombre}
               {ot.actividad && ` · ${ot.actividad}`}
@@ -2433,18 +2473,20 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
             </div>
           </div>
 
-          <div>
-            <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha de reporte <span className="text-red-400">*</span></label>
-            <input className="input-base" type="date" autoFocus
-              value={form.fecha_reporte} onChange={e => setForm(p => ({ ...p, fecha_reporte: e.target.value }))} />
-          </div>
+          {mostrarFecha && (
+            <div>
+              <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha de reporte <span className="text-red-400">*</span></label>
+              <input className="input-base" type="date" autoFocus
+                value={form.fecha_reporte} onChange={e => setForm(p => ({ ...p, fecha_reporte: e.target.value }))} />
+            </div>
+          )}
 
-          {tieneCantidad && (
+          {mostrarCantidad && (
             <div>
               <label className="text-xs font-semibold text-gray-400 block mb-1">
                 Cantidad entregada <span className="text-gray-600 font-normal">de {ot.cantidad_programada} programadas</span>
               </label>
-              <input className="input-base" type="number" min="0" placeholder="Ej: 100"
+              <input className="input-base" type="number" min="0" placeholder="Ej: 100" autoFocus={mode==='cantidad'}
                 value={form.cantidad_entregada} onChange={e => setForm(p => ({ ...p, cantidad_entregada: e.target.value }))} />
               {pctCant !== null && (
                 <div className="mt-1.5">
@@ -2460,7 +2502,7 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
             </div>
           )}
 
-          {esOTmodulo && modulo?.tiene_penalidad && (
+          {mode === 'reportar' && esOTmodulo && modulo?.tiene_penalidad && (
             <div>
               <label className="text-xs font-semibold text-gray-400 block mb-1">Penalización manual (S/)</label>
               <input className="input-base" type="number" min="0" step="0.01" placeholder="0.00"
@@ -2468,11 +2510,13 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
             </div>
           )}
 
-          <div>
-            <label className="text-xs font-semibold text-gray-400 block mb-1">Observaciones</label>
-            <textarea className="input-base" rows={3} placeholder="Notas del proceso, incidencias, justificaciones..."
-              value={form.observaciones} onChange={e => setForm(p => ({ ...p, observaciones: e.target.value }))} />
-          </div>
+          {mode === 'reportar' && (
+            <div>
+              <label className="text-xs font-semibold text-gray-400 block mb-1">Observaciones</label>
+              <textarea className="input-base" rows={3} placeholder="Notas del proceso, incidencias, justificaciones..."
+                value={form.observaciones} onChange={e => setForm(p => ({ ...p, observaciones: e.target.value }))} />
+            </div>
+          )}
 
           {estadoPreview && (
             <div className="p-3 rounded-lg border border-gray-800 text-xs" style={{ background: '#0d1526' }}>
@@ -2495,7 +2539,7 @@ function ModalSeguimiento({ ot, modulo, contratistas, periodo, onClose, onSave }
         <div className="modal-footer">
           <button className="btn-ghost" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={guardar} disabled={saving}>
-            {saving ? '⏳ Guardando...' : '💾 Guardar seguimiento'}
+            {saving ? '⏳ Guardando...' : mode === 'fecha' ? '💾 Guardar fecha' : mode === 'cantidad' ? '💾 Guardar cantidad' : '💾 Guardar seguimiento'}
           </button>
         </div>
       </div>

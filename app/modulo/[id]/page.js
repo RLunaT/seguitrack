@@ -1074,9 +1074,25 @@ export default function ModuloPage() {
                             }
                             if (k === 'duracion_real') return <td key={k} className="text-center font-mono text-xs">{ot.duracion_real??'—'}</td>
                             if (k === 'dias_fuera') return <td key={k} className="text-center font-mono text-xs" style={{color:(ot.dias_fuera_plazo||0)>0?'#ef4444':'#6b7280'}}>{ot.dias_fuera_plazo||0}</td>
-                            if (k === 'val_pen') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_penalidades_manual||0)>0?'#fbbf24':'#6b7280'}}>{(ot.val_penalidades_manual||0)>0?fmtMoneda(ot.val_penalidades_manual):'—'}</td>
+                            if (k === 'val_pen') return (
+                              <td key={k} style={{padding:'2px 8px'}}>
+                                <button onClick={() => { setOtSeg(ot); setModalSeg(true) }}
+                                  className="font-mono text-xs w-full text-right"
+                                  style={{background:'transparent',border:'none',cursor:'pointer',color:(ot.val_penalidades_manual||0)>0?'#fbbf24':'#475569',padding:'2px 0'}}>
+                                  {(ot.val_penalidades_manual||0)>0?fmtMoneda(ot.val_penalidades_manual):'—'}
+                                </button>
+                              </td>
+                            )
                             if (k === 'val_total') return <td key={k} className="font-mono text-xs text-right" style={{color:(ot.val_total_penalidad||0)>0?'#ef4444':'#6b7280'}}>{(ot.val_total_penalidad||0)>0?fmtMoneda(ot.val_total_penalidad):'—'}</td>
-                            if (k === 'observaciones') return <td key={k} className="text-xs text-gray-500">{ot.observaciones||'—'}</td>
+                            if (k === 'observaciones') return (
+                              <td key={k} style={{padding:'2px 8px', maxWidth:180}}>
+                                <button onClick={() => { setOtSeg(ot); setModalSeg(true) }}
+                                  className="text-xs text-left w-full"
+                                  style={{background:'transparent',border:'none',cursor:'pointer',color:ot.observaciones?'#9ca3af':'#374151',padding:'2px 0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block',maxWidth:180}}>
+                                  {ot.observaciones||'—'}
+                                </button>
+                              </td>
+                            )
                             if (k === 'eficiencia') return <td key={k} className="text-xs font-mono font-semibold" style={{color:efInfo.color}}>{efInfo.label}</td>
                             if (k === 'accion_doc') return <td key={k}>{tienePlantilla?<BotonDocumento onWord={()=>generarWordDirecto(ot)} onPdf={()=>generarPdfDirecto(ot)}/>:'—'}</td>
                             if (k.startsWith('extra_')) {

@@ -71,9 +71,10 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
     ...(tienePlantilla ? ['3. Documento'] : []),
   ]
 
-  const [step, setStep]     = useState(1)
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
+  const [step, setStep]       = useState(1)
+  const [editTab, setEditTab] = useState('datos') // 'datos' | 'documento'
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
   const [guardado, setGuardado] = useState(null)
 
   // Rastrea si el valor actual de doc_codigo_ot fue puesto automáticamente
@@ -796,32 +797,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                         value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/>
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_cumplimiento} name="p3_doc_cumplimiento" autoComplete="off"
-                        value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en el doc.</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_actividad} name="p3_doc_actividad" autoComplete="off"
-                        value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label>
-                      <input className="input-base" placeholder={modulo?.plantilla_editado_por} name="p3_doc_editado_por" autoComplete="off"
-                        value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 1 — Coordinador</label>
-                      <input className="input-base" placeholder="CONSORCIO SUPERVISOR" name="p3_doc_coordinador" autoComplete="off"
-                        value={form.datos_extra['doc_coordinador']||''} onChange={e=>setExtra('doc_coordinador',e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 2 — Área usuaria</label>
-                      <input className="input-base" placeholder="ELECTROPUNO S.A.A" name="p3_doc_area_usuaria" autoComplete="off"
-                        value={form.datos_extra['doc_area_usuaria']||''} onChange={e=>setExtra('doc_area_usuaria',e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 3 — Contratista</label>
+                      <label className="text-xs font-semibold text-gray-400 block mb-1">Firma — Contratista</label>
                       <input className="input-base" placeholder={cont?.nombre||'—'} name="p3_doc_contratista_firma" autoComplete="off"
                         value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)}/>
                     </div>
@@ -876,141 +852,126 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
             </>
           )}
 
-          {/* ══ MODO EDITAR — formulario completo ══ */}
+          {/* ══ MODO EDITAR — tabs ══ */}
           {esEdicion && (
-            <div className="space-y-5" style={{maxHeight:'68vh', overflowY:'auto'}}>
+            <div>
+              {/* Tab bar */}
+              <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{background:'#0d1117'}}>
+                {(['datos', ...(tienePlantilla ? ['documento'] : [])]).map(tab => (
+                  <button key={tab} onClick={() => setEditTab(tab)}
+                    className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all"
+                    style={editTab === tab
+                      ? { background: tab === 'documento' ? '#1e3a5f' : '#1f2937', color: tab === 'documento' ? '#93c5fd' : '#f9fafb' }
+                      : { background: 'transparent', color: '#6b7280' }}>
+                    {tab === 'datos' ? '📋 Datos' : '📄 Documento'}
+                  </button>
+                ))}
+              </div>
 
-              {/* Identificación */}
-              <section>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📌 Identificación</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">N° Registro</label>
-                    <div className="input-base opacity-50 font-mono">{ot.numero_registro || '—'}</div>
-                  </div>
-                  {esOT && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">N° OT</label>
-                    <input className="input-base" value={form.numero_ot} onChange={e=>setField('numero_ot',e.target.value)}/>
-                  </div>}
-                  {esOT && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Contratista</label>
-                    <select className="input-base" value={form.contratista_id} onChange={e=>setField('contratista_id',e.target.value)}>
-                      <option value="">—</option>
-                      {contratistas.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
-                    </select>
-                  </div>}
-                  {actividades.length>0 && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad</label>
-                    <select className="input-base" value={form.actividad} onChange={e=>setField('actividad',e.target.value)}>
-                      {actividades.map(a=><option key={a} value={a}>{a}</option>)}
-                    </select>
-                  </div>}
-                  {esOT && motivos.length>0 && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Motivo OT</label>
-                    <select className="input-base" value={form.motivo_ot} onChange={e=>setField('motivo_ot',e.target.value)}>
-                      {motivos.map(m=><option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>}
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">
-                      Semana
-                    </label>
-                    <select className="input-base" value={form.semana} onChange={e=>setField('semana',e.target.value)}>
-                      <option value="">—</option>
-                      {semanas.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Cantidad programada</label>
-                    <input className="input-base" type="number" min="0" value={form.cantidad_programada} onChange={e=>setField('cantidad_programada',e.target.value)}/>
-                  </div>
+              {/* Tab: Datos */}
+              {editTab === 'datos' && (
+                <div className="space-y-5" style={{maxHeight:'60vh', overflowY:'auto'}}>
+
+                  <section>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📌 Identificación</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">N° Registro</label>
+                        <div className="input-base opacity-50 font-mono">{ot.numero_registro || '—'}</div>
+                      </div>
+                      {esOT && <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">N° OT</label>
+                        <input className="input-base" value={form.numero_ot} onChange={e=>setField('numero_ot',e.target.value)}/>
+                      </div>}
+                      {esOT && <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Contratista</label>
+                        <select className="input-base" value={form.contratista_id} onChange={e=>setField('contratista_id',e.target.value)}>
+                          <option value="">—</option>
+                          {contratistas.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+                        </select>
+                      </div>}
+                      {actividades.length>0 && <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Actividad</label>
+                        <select className="input-base" value={form.actividad} onChange={e=>setField('actividad',e.target.value)}>
+                          {actividades.map(a=><option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>}
+                      {esOT && motivos.length>0 && <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Motivo OT</label>
+                        <select className="input-base" value={form.motivo_ot} onChange={e=>setField('motivo_ot',e.target.value)}>
+                          {motivos.map(m=><option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </div>}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Semana</label>
+                        <select className="input-base" value={form.semana} onChange={e=>setField('semana',e.target.value)}>
+                          <option value="">—</option>
+                          {semanas.map(s=><option key={s.label} value={s.label}>{s.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Cantidad programada</label>
+                        <input className="input-base" type="number" min="0" value={form.cantidad_programada} onChange={e=>setField('cantidad_programada',e.target.value)}/>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📅 Fechas</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {tienePlantilla && tieneOffsets && <div className="col-span-2 p-3 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
+                        <label className="text-xs font-bold text-blue-400 block mb-1">📅 Fecha entrega OT</label>
+                        <input className="input-base" type="date" value={form.datos_extra['doc_fecha_entrega']||''} onChange={e=>setExtra('doc_fecha_entrega',e.target.value)}/>
+                      </div>}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio</label>
+                        <input className="input-base" type="date" value={form.fecha_inicio} onChange={e=>setField('fecha_inicio',e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha fin trabajos</label>
+                        <input className="input-base" type="date" value={form.fecha_fin_trabajos} onChange={e=>setField('fecha_fin_trabajos',e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite *</label>
+                        <input className="input-base" type="date" value={form.fecha_limite_expedientes} onChange={e=>setField('fecha_limite_expedientes',e.target.value)}/>
+                      </div>
+                    </div>
+                  </section>
+
+                  {camposExtra.length > 0 && (
+                    <section>
+                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🔧 Campos del módulo</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        {camposExtra.map(campo=>(
+                          <div key={campo.id}>
+                            <label className="text-xs font-semibold text-gray-400 block mb-1">{campo.nombre}{campo.obligatorio?' *':''}</label>
+                            {campo.tipo==='lista'&&campo.opciones?<select className="input-base" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}><option value="">—</option>{campo.opciones.split(',').map(o=><option key={o.trim()} value={o.trim()}>{o.trim()}</option>)}</select>
+                            :campo.tipo==='fecha'?<input className="input-base" type="date" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>
+                            :campo.tipo==='numero'?<input className="input-base" type="number" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>
+                            :<input className="input-base" type="text" placeholder={campo.nombre} value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {error && <div className="p-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-sm">❌ {error}</div>}
                 </div>
-              </section>
+              )}
 
-              {/* Fechas */}
-              <section>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📅 Fechas</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  {tienePlantilla && tieneOffsets && <div className="col-span-2 p-3 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
-                    <label className="text-xs font-bold text-blue-400 block mb-1">📅 Fecha entrega OT</label>
-                    <input className="input-base" type="date" value={form.datos_extra['doc_fecha_entrega']||''} onChange={e=>setExtra('doc_fecha_entrega',e.target.value)}/>
-                  </div>}
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha inicio</label>
-                    <input className="input-base" type="date" value={form.fecha_inicio} onChange={e=>setField('fecha_inicio',e.target.value)}/>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha fin trabajos</label>
-                    <input className="input-base" type="date" value={form.fecha_fin_trabajos} onChange={e=>setField('fecha_fin_trabajos',e.target.value)}/>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha límite *</label>
-                    <input className="input-base" type="date" value={form.fecha_limite_expedientes} onChange={e=>setField('fecha_limite_expedientes',e.target.value)}/>
-                  </div>
-                </div>
-              </section>
-
-              {/* Seguimiento */}
-              <section>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📊 Seguimiento</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Fecha reporte</label>
-                    <input className="input-base" type="date" value={form.fecha_reporte} onChange={e=>setField('fecha_reporte',e.target.value)}/>
-                  </div>
-                  {[1,2,3].includes(modulo?.id) && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Cantidad entregada</label>
-                    <input className="input-base" type="number" min="0" value={form.cantidad_entregada||''} onChange={e=>setField('cantidad_entregada',e.target.value)}/>
-                    {form.cantidad_programada&&form.cantidad_entregada!==''&&<p className="text-xs mt-1 font-mono" style={{color:Math.round(form.cantidad_entregada/form.cantidad_programada*100)>=100?'#22c55e':Math.round(form.cantidad_entregada/form.cantidad_programada*100)>=80?'#eab308':'#ef4444'}}>{Math.round(form.cantidad_entregada/form.cantidad_programada*100)}% entregado</p>}
-                  </div>}
-                  {esOT && modulo.tiene_penalidad && <div>
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Penalización manual (S/)</label>
-                    <input className="input-base" type="number" min="0" step="0.01" placeholder="0.00" value={form.val_penalidades_manual} onChange={e=>setField('val_penalidades_manual',e.target.value)}/>
-                  </div>}
-                  <div className="col-span-2">
-                    <label className="text-xs font-semibold text-gray-400 block mb-1">Observaciones</label>
-                    <textarea className="input-base" rows={2} placeholder="Notas, incidencias, justificaciones..." value={form.observaciones} onChange={e=>setField('observaciones',e.target.value)}/>
-                  </div>
-                </div>
-              </section>
-
-              {/* Documento */}
-              {tienePlantilla && (
-                <section>
-                  <h3 className="text-xs font-bold text-blue-500 uppercase tracking-wider mb-3">📄 Documento Word</h3>
+              {/* Tab: Documento */}
+              {editTab === 'documento' && tienePlantilla && (
+                <div className="space-y-4" style={{maxHeight:'60vh', overflowY:'auto'}}>
+                  <p className="text-xs text-gray-500">Estos valores se usan al generar el Word/PDF. Se pre-rellenan automáticamente; edítalos solo si necesitas ajustar algo puntual.</p>
                   <div className="grid grid-cols-2 gap-3 p-4 rounded-xl border border-blue-900" style={{background:'#0c1a2e'}}>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label><input className="input-base" placeholder={generarCodigoOT(form.semana, periodo, { motivo: form.motivo_ot, fechaInicio: form.fecha_inicio }) || 'EPU07IP26'} value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)} name="st_doc_codigo_ot" autoComplete="off"/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label><input className="input-base" type="number" placeholder="1" value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)} name="st_doc_dias_plazo" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Cumplimiento</label><input className="input-base" placeholder={modulo?.plantilla_cumplimiento} value={form.datos_extra['doc_cumplimiento']||''} onChange={e=>setExtra('doc_cumplimiento',e.target.value)} name="st_doc_cumplimiento" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Actividad en doc.</label><input className="input-base" placeholder={modulo?.plantilla_actividad} value={form.datos_extra['doc_actividad']||''} onChange={e=>setExtra('doc_actividad',e.target.value)} name="st_doc_actividad" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Editado por</label><input className="input-base" placeholder={modulo?.plantilla_editado_por} value={form.datos_extra['doc_editado_por']||''} onChange={e=>setExtra('doc_editado_por',e.target.value)} name="st_doc_editado_por" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 1 — Coordinador</label><input className="input-base" placeholder="CONSORCIO SUPERVISOR" value={form.datos_extra['doc_coordinador']||''} onChange={e=>setExtra('doc_coordinador',e.target.value)} name="st_doc_coordinador" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 2 — Área usuaria</label><input className="input-base" placeholder="ELECTROPUNO S.A.A" value={form.datos_extra['doc_area_usuaria']||''} onChange={e=>setExtra('doc_area_usuaria',e.target.value)} name="st_doc_area_usuaria" autoComplete="off"/></div>
-                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 3 — Contratista</label><input className="input-base" placeholder={cont?.nombre||'—'} value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)} name="st_doc_contratista_firma" autoComplete="off"/></div>
+                    <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma — Contratista</label><input className="input-base" placeholder={cont?.nombre||'—'} value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)} name="st_doc_contratista_firma" autoComplete="off"/></div>
                     <div><label className="text-xs font-semibold text-gray-400 block mb-1">Firma 4</label><input className="input-base" placeholder="Opcional" value={form.datos_extra['doc_firma4']||''} onChange={e=>setExtra('doc_firma4',e.target.value)} name="st_doc_firma4" autoComplete="off"/></div>
                   </div>
-                </section>
+                  {error && <div className="p-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-sm">❌ {error}</div>}
+                </div>
               )}
-
-              {/* Campos extra */}
-              {camposExtra.length > 0 && (
-                <section>
-                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🔧 Campos del módulo</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    {camposExtra.map(campo=>(
-                      <div key={campo.id}>
-                        <label className="text-xs font-semibold text-gray-400 block mb-1">{campo.nombre}{campo.obligatorio?' *':''}</label>
-                        {campo.tipo==='lista'&&campo.opciones?<select className="input-base" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}><option value="">—</option>{campo.opciones.split(',').map(o=><option key={o.trim()} value={o.trim()}>{o.trim()}</option>)}</select>
-                        :campo.tipo==='fecha'?<input className="input-base" type="date" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>
-                        :campo.tipo==='numero'?<input className="input-base" type="number" value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>
-                        :<input className="input-base" type="text" placeholder={campo.nombre} value={form.datos_extra[campo.clave]||''} onChange={e=>setExtra(campo.clave,e.target.value)}/>}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {error && <div className="p-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-sm">❌ {error}</div>}
             </div>
           )}
         </div>
@@ -1027,6 +988,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
             }
           </div>
         )}
+
       </div>
     </div>
   )
