@@ -185,7 +185,7 @@ Deno.serve(async (_req) => {
       { data: modulos,  error: eMod  },
     ] = await Promise.all([
       supabase.from('notif_config').select('*').eq('activo', true),
-      supabase.from('ots').select('*').not('fecha_limite_expedientes', 'is', null),
+      supabase.from('ots').select('*').not('fecha_limite_expedientes', 'is', null).is('deleted_at', null),
       supabase.from('modulos').select('id, nombre, icono'),
     ])
 

@@ -990,6 +990,7 @@ export default function DashboardPage() {
   const [modalMeta, setModalMeta] = useState(null) // { modulo_id, modulo_nombre, periodo }
   const [metaForm, setMetaForm]   = useState({ semestral:'', anual:'', mensual:'', semanal:'' })
   const [guardandoMeta, setGuardandoMeta] = useState(false)
+  const [chartTab, setChartTab]           = useState('cantidades')
   const [verPor, setVerPor]               = useState('semestral')
   const [periodoSelec, setPeriodoSelec]   = useState('')
   const [anioSelec, setAnioSelec]         = useState('')
@@ -1511,254 +1512,45 @@ export default function DashboardPage() {
         )
       })()}
 
-            {/* ══════════ VISTA GENERAL ══════════ */}
+      {/* ══════════ VISTA GENERAL ══════════ */}
       {modActivo==='general' && (<>
 
-        {/* KPIs */}
-        <div className="grid gap-3" style={{gridTemplateColumns:'repeat(auto-fit,minmax(148px,1fr))'}}>
-          <KpiCard label="Total registros" value={global.total} color="#3b82f6" icon="📋" sub={`en ${xModulo.filter(m=>m.total>0).length} módulos`} tooltip={<><div className="font-bold text-white mb-1">Total de registros</div><div className="text-gray-400">Suma de todos los registros en todos los módulos activos del periodo {periodo}.</div></>}/>
-          <KpiCard label="Cumplieron" value={global.cumplidos} color="#22c55e" icon="✅" pct={pctG} sub={`${global.a_tiempo} a tiempo · ${global.tarde} con retraso`} tooltip={<><div className="font-bold text-white mb-1">Cumplieron</div><div className="space-y-0.5"><div className="flex justify-between gap-3"><span style={{color:C[1]}}>A tiempo:</span><span className="font-mono">{global.a_tiempo}</span></div><div className="flex justify-between gap-3"><span style={{color:C[2]}}>Con retraso:</span><span className="font-mono">{global.tarde}</span></div></div></>}/>
-          <KpiCard label="En proceso" value={global.en_proceso} color="#3b82f6" icon="●" sub="sin reporte, dentro del plazo" tooltip="Registros activos que aún no han sido reportados pero están dentro del plazo establecido."/>
-          <KpiCard label="Por vencer" value={global.por_vencer} color="#eab308" icon="⚡" sub="vencen en los próximos días" tooltip="Registros sin reporte cuya fecha límite está próxima. Requieren atención inmediata."/>
-          <KpiCard label="Fuera de plazo" value={global.fuera} color="#ef4444" icon="❌" sub="sin reporte, plazo vencido" tooltip="Registros que superaron la fecha límite sin haber sido reportados. Generan penalidades."/>
-          {global.pen_total>0&&<KpiCard label="Penalidades" value={fmtMoneda(global.pen_total)} color="#f43f5e" icon="💰" sub="acumulado en todos los módulos" small tooltip="Total de penalidades acumuladas por retrasos en todos los módulos."/>}
-          {global.efic_prom!==null&&(()=>{const ei=getEficienciaLabel(global.efic_prom);return<KpiCard label="Eficiencia global" value={`${global.efic_prom}%`} color={ei.color} icon="📈" sub={ei.label} small tooltip={<><div className="font-bold text-white mb-1">Eficiencia global promedio</div><div className="text-gray-400">Promedio ponderado entre cumplimiento de cantidades y plazos. Nota: {ei.grade}</div></>}/>})()}
-
-        {/* ── KPIs de CANTIDADES ── */}
-        {(global.cant_prog > 0) && (<>
-          <div className="col-span-full mt-1 mb-0">
-            <div className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
-              <div className="flex-1 h-px bg-gray-800"/>
-              <span>📦 Avance por Cantidades</span>
-              <div className="flex-1 h-px bg-gray-800"/>
-            </div>
+        {/* KPIs compactos — barra horizontal */}
+        <div className="card" style={{padding:'10px 16px'}}>
+          <div style={{display:'flex',flexWrap:'wrap',alignItems:'stretch'}}>
+            {[
+              { label:'Total', value:String(global.total), color:'#3b82f6', sub:`${xModulo.filter(m=>m.total>0).length} módulos` },
+              { label:'Cumplieron', value:String(global.cumplidos), color:'#22c55e', sub:`${pctG}% · ${global.a_tiempo}✓ ${global.tarde}↑` },
+              { label:'En proceso', value:String(global.en_proceso), color:'#60a5fa', sub:'dentro del plazo' },
+              { label:'Por vencer', value:String(global.por_vencer), color:'#eab308', sub:'próximos días' },
+              { label:'Fuera', value:String(global.fuera), color:'#ef4444', sub:'plazo vencido' },
+              ...(global.pen_total>0?[{label:'Penalidades',value:fmtMoneda(global.pen_total),color:'#f43f5e',sub:'total acumulado'}]:[]),
+              ...(global.efic_prom!==null?(()=>{const ei=getEficienciaLabel(global.efic_prom);return[{label:'Eficiencia',value:`${global.efic_prom}%`,color:ei.color,sub:ei.label}]})():[]),
+              ...(global.cant_prog>0?(()=>{const pct=Math.round(global.cant_entr/global.cant_prog*100);const col=pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444';return[{label:'Cantidades',value:`${global.cant_entr.toLocaleString('es-PE')} / ${global.cant_prog.toLocaleString('es-PE')}`,color:col,sub:`${pct}% entregado`}]})():[]),
+            ].map((s,i)=>(
+              <div key={i} style={{padding:'4px 18px',borderLeft:i>0?'1px solid #1f2937':'none',minWidth:90}}>
+                <div style={{fontSize:17,fontWeight:700,fontFamily:'monospace',color:s.color,lineHeight:1.1}}>{s.value}</div>
+                <div style={{fontSize:11,color:'#9ca3af',marginTop:2,fontWeight:500}}>{s.label}</div>
+                <div style={{fontSize:10,color:'#4b5563'}}>{s.sub}</div>
+              </div>
+            ))}
           </div>
-          <KpiCard label="Cant. Programada" value={global.cant_prog.toLocaleString('es-PE')} color="#3b82f6" icon="📋" sub="total programado" tooltip="Suma de todas las cantidades programadas en las OTs del período."/>
-          <KpiCard label="Cant. Entregada" value={global.cant_entr.toLocaleString('es-PE')} color="#22c55e" icon="📦" sub="total entregado" tooltip="Suma de todas las cantidades efectivamente entregadas en el período."/>
-          {(()=>{
-            const pct = global.cant_prog>0 ? Math.round(global.cant_entr/global.cant_prog*100) : 0
-            const color = pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444'
-            return <KpiCard label="Avance" value={`${pct}%`} color={color} icon="📊"
-              pct={pct} sub={`${global.cant_entr.toLocaleString('es-PE')} / ${global.cant_prog.toLocaleString('es-PE')}`}
-              tooltip="Porcentaje de avance: cantidad entregada respecto a la programada."/>
-          })()}
-          {global.cant_prog > global.cant_entr && (
-            <KpiCard label="Pendiente" value={(global.cant_prog-global.cant_entr).toLocaleString('es-PE')} color="#f59e0b" icon="⏳" sub="unidades por entregar" tooltip="Diferencia entre lo programado y lo entregado hasta la fecha."/>
-          )}
-        </>)}
         </div>
 
-        {/* Donut + Estado por módulo */}
-        <div className="grid gap-4" style={{gridTemplateColumns:'320px 1fr'}}>
-          <div className="card" style={{display:'flex',flexDirection:'column',gap:10}}>
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">🍩 Distribución global</div>
-              <Tooltip content="Pasa el mouse sobre cada sector del donut para ver el detalle."><span className="text-xs text-gray-600 cursor-help">ℹ️</span></Tooltip>
-            </div>
-            {/* Donut + lista horizontal */}
-            <div className="flex items-center gap-4 flex-1">
-              <div className="flex-shrink-0">
-                <Donut segs={segG} size={140} grosor={26} centro={<>
-                  <div className="text-2xl font-bold font-mono text-white leading-none">{pctG}%</div>
-                  <div className="text-xs text-gray-500 mt-0.5">cumplidos</div>
-                  <div style={{fontSize:10}} className="text-gray-600">{global.cumplidos}/{global.total}</div>
-                </>}/>
-              </div>
-              <div className="flex-1 space-y-2.5">
-                {segG.map(s => {
-                  const pct = global.total > 0 ? Math.round(s.n / global.total * 100) : 0
-                  // ── Helpers de metas ───────────────────────────────────────
-  function getMeta(modulo_id, tipo, referencia) {
-    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
-  }
+        {/* Layout principal: módulos (izq) + gráficos+urgentes (der) */}
+        <div className="grid gap-4" style={{gridTemplateColumns:'1fr 340px'}}>
 
-  function getMetasDelModulo(modulo_id, per) {
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const todas = [
-      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
-      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
-      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
-      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
-    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
-      .filter(m => m.meta)
-    // Si hay verPor activo, mostrar solo esa vista primero + las demás
-    if (verPor && todas.find(m=>m.tipo===verPor)) {
-      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
-    }
-    return todas
-  }
-
-  async function abrirModalMeta(mod) {
-    const per = periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    setMetaForm({
-      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
-      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
-      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
-      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
-    })
-    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
-  }
-
-  async function guardarMetas() {
-    if (!modalMeta) return
-    setGuardandoMeta(true)
-    const per  = modalMeta.periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const items = [
-      { tipo:'semestral', ref:per,        val:metaForm.semestral },
-      { tipo:'anual',     ref:anio,       val:metaForm.anual },
-      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
-      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
-    ]
-    for (const item of items) {
-      const cant = parseInt(item.val)
-      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
-      if (!isNaN(cant) && cant > 0) {
-        if (existing) {
-          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
-        } else {
-          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
-        }
-      } else if (existing) {
-        // Si se borró el valor, eliminar la meta
-        await supabase.from('metas').delete().eq('id', existing.id)
-      }
-    }
-    // Recargar metas
-    const { data: nuevasMetas } = await supabase.from('metas').select('*')
-    setMetas(nuevasMetas || [])
-    setGuardandoMeta(false)
-    setModalMeta(null)
-  }
-
-  return (
-                    <div key={s.label}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <div style={{width:8,height:8,borderRadius:2,background:s.color,flexShrink:0}}/>
-                          <span style={{fontSize:11,color:'#9ca3af'}}>{s.label}</span>
-                        </div>
-                        <span style={{fontSize:11,color:s.color,fontFamily:'monospace',fontWeight:700}}>{s.n}</span>
-                      </div>
-                      <div style={{height:5,background:'#1f2937',borderRadius:3,overflow:'hidden'}}>
-                        <div style={{width:`${pct}%`,height:'100%',background:s.color,borderRadius:3,transition:'width 0.4s'}}/>
-                      </div>
-                      <div style={{fontSize:9,color:'#4b5563',marginTop:1,textAlign:'right'}}>{pct}%</div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-            {/* Barra total al fondo */}
-            <Bar segs={segG} total={global.total} h={8}/>
-          </div>
-
+          {/* Estado por módulo */}
           <div className="card">
             <div className="flex items-center justify-between mb-3">
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">📁 Estado por módulo</div>
-              <span className="text-xs text-gray-600">Clic en un módulo para ver su detalle</span>
+              <span className="text-xs text-gray-600">Clic para ver detalle</span>
             </div>
-            <div className="space-y-2" style={{maxHeight:400,overflowY:'auto'}}>
+            <div className="space-y-2" style={{maxHeight:480,overflowY:'auto'}}>
               {xModulo.filter(m=>m.total>0).map(mod=>{
                 const pct=mod.total>0?Math.round(mod.cumplidos/mod.total*100):0
                 const segs=[{n:mod.a_tiempo,color:C[1],label:'A tiempo'},{n:mod.tarde,color:C[2],label:'Tarde'},{n:mod.en_proceso,color:C[3],label:'En proceso'},{n:mod.por_vencer,color:C[4],label:'Por vencer'},{n:mod.fuera,color:C[5],label:'Fuera'}]
-                // ── Helpers de metas ───────────────────────────────────────
-  function getMeta(modulo_id, tipo, referencia) {
-    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
-  }
-
-  function getMetasDelModulo(modulo_id, per) {
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const todas = [
-      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
-      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
-      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
-      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
-    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
-      .filter(m => m.meta)
-    // Si hay verPor activo, mostrar solo esa vista primero + las demás
-    if (verPor && todas.find(m=>m.tipo===verPor)) {
-      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
-    }
-    return todas
-  }
-
-  async function abrirModalMeta(mod) {
-    const per = periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    setMetaForm({
-      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
-      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
-      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
-      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
-    })
-    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
-  }
-
-  async function guardarMetas() {
-    if (!modalMeta) return
-    setGuardandoMeta(true)
-    const per  = modalMeta.periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const items = [
-      { tipo:'semestral', ref:per,        val:metaForm.semestral },
-      { tipo:'anual',     ref:anio,       val:metaForm.anual },
-      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
-      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
-    ]
-    for (const item of items) {
-      const cant = parseInt(item.val)
-      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
-      if (!isNaN(cant) && cant > 0) {
-        if (existing) {
-          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
-        } else {
-          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
-        }
-      } else if (existing) {
-        // Si se borró el valor, eliminar la meta
-        await supabase.from('metas').delete().eq('id', existing.id)
-      }
-    }
-    // Recargar metas
-    const { data: nuevasMetas } = await supabase.from('metas').select('*')
-    setMetas(nuevasMetas || [])
-    setGuardandoMeta(false)
-    setModalMeta(null)
-  }
-
-  return (
+                return (
                   <Tooltip key={mod.id} block content={<>
                     <div className="font-bold text-white mb-2">{mod.icono} {mod.nombre}</div>
                     <div className="space-y-0.5">
@@ -1784,15 +1576,14 @@ export default function DashboardPage() {
                           <span className="text-xs text-blue-500">→</span>
                         </div>
                       </div>
-                      <Bar segs={segs} total={mod.total} h={12}/>
+                      <Bar segs={segs} total={mod.total} h={10}/>
                       <div className="flex justify-between mt-1.5">
                         <Leyenda items={LEYENDA_ESTADOS}/>
                         <span className="text-xs font-mono font-bold" style={{color:pct>=80?C[1]:pct>=50?C[4]:C[5]}}>{pct}% cumplidos</span>
                       </div>
-                      {/* Barras de meta */}
-                      {getMetasDelModulo(mod.id, periodo).map(m => {
-                        const entregado = mod.ots?.reduce((s,o)=>s+(o.cantidad_entregada||0),0) || 0
-                        const pctMeta   = Math.min(100, Math.round(entregado / m.meta.cantidad * 100))
+                      {getMetasDelModulo(mod.id, periodo).map(m=>{
+                        const entregado=mod.ots?.reduce((s,o)=>s+(o.cantidad_entregada||0),0)||0
+                        const pctMeta=Math.min(100,Math.round(entregado/m.meta.cantidad*100))
                         return (
                           <div key={m.tipo} className="mt-1.5">
                             <div className="flex justify-between text-xs text-gray-500 mb-0.5">
@@ -1800,10 +1591,7 @@ export default function DashboardPage() {
                               <span className="font-mono">{entregado.toLocaleString('es-PE')} / {m.meta.cantidad.toLocaleString('es-PE')} ({pctMeta}%)</span>
                             </div>
                             <div className="w-full h-1.5 rounded-full" style={{background:'#1e293b'}}>
-                              <div className="h-1.5 rounded-full transition-all" style={{
-                                width:`${pctMeta}%`,
-                                background: pctMeta>=100?'#22c55e':pctMeta>=70?'#3b82f6':'#f59e0b'
-                              }}/>
+                              <div className="h-1.5 rounded-full transition-all" style={{width:`${pctMeta}%`,background:pctMeta>=100?'#22c55e':pctMeta>=70?'#3b82f6':'#f59e0b'}}/>
                             </div>
                           </div>
                         )
@@ -1814,158 +1602,114 @@ export default function DashboardPage() {
               })}
             </div>
           </div>
-        </div>
 
-        {/* ── AVANCE POR CANTIDADES POR MÓDULO ── */}
-        {xModulo.some(m=>(m.cant_prog||0)>0) && (
-          <div className="card">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-base">📦</span>
-              <span className="text-sm font-bold text-white">Avance por Cantidades</span>
-              <span className="text-xs text-gray-500">· por módulo</span>
-            </div>
-            <div className="space-y-4">
-              {xModulo.filter(m=>(m.cant_prog||0)>0).map(mod => {
-                const pct = Math.round((mod.cant_entr||0)/(mod.cant_prog||1)*100)
-                const color = pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444'
-                const pendiente = (mod.cant_prog||0)-(mod.cant_entr||0)
-                return (
-                  <div key={mod.id}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span>{mod.icono}</span>
-                        <span className="text-xs font-semibold text-gray-200">{mod.nombre}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs font-mono">
-                        <span className="text-gray-500">{(mod.cant_entr||0).toLocaleString('es-PE')} / {(mod.cant_prog||0).toLocaleString('es-PE')}</span>
-                        <span className="font-bold" style={{color}}>{pct}%</span>
-                      </div>
-                    </div>
-                    <div className="w-full h-3 rounded-full" style={{background:'#1e293b'}}>
-                      <div className="h-3 rounded-full transition-all duration-500" style={{width:`${Math.min(100,pct)}%`,background:color}}/>
-                    </div>
-                    {pendiente>0&&<div className="text-xs text-gray-600 mt-0.5 text-right">{pendiente.toLocaleString('es-PE')} pendientes</div>}
+          {/* Panel derecho: tarjeta de gráficos con pestañas + urgentes */}
+          <div className="flex flex-col gap-4">
+
+            {/* Tarjeta de gráficos con pestañas */}
+            <div className="card">
+              <div className="flex gap-1 mb-4 p-1 rounded-xl" style={{background:'#0d1117'}}>
+                {[
+                  {key:'cantidades',   label:'📦 Cantidades'},
+                  {key:'distribucion', label:'🍩 Distribución'},
+                  {key:'semanas',      label:'📅 Por semana'},
+                ].map(t=>(
+                  <button key={t.key} onClick={()=>setChartTab(t.key)}
+                    className="flex-1 text-xs py-1.5 rounded-lg transition-all"
+                    style={chartTab===t.key
+                      ?{background:'#1d4ed8',color:'#fff',fontWeight:600}
+                      :{background:'transparent',color:'#6b7280'}}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {chartTab==='cantidades' && (
+                xModulo.some(m=>(m.cant_prog||0)>0) ? (
+                  <div className="space-y-3">
+                    {xModulo.filter(m=>(m.cant_prog||0)>0).map(mod=>{
+                      const pct=Math.round((mod.cant_entr||0)/(mod.cant_prog||1)*100)
+                      const color=pct>=100?'#22c55e':pct>=70?'#3b82f6':pct>=40?'#eab308':'#ef4444'
+                      return (
+                        <div key={mod.id}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1.5">
+                              <span style={{fontSize:13}}>{mod.icono}</span>
+                              <span className="text-xs font-medium text-gray-300 truncate" style={{maxWidth:130}}>{mod.nombre}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs font-mono flex-shrink-0">
+                              <span className="text-gray-500">{(mod.cant_entr||0).toLocaleString('es-PE')}/{(mod.cant_prog||0).toLocaleString('es-PE')}</span>
+                              <span className="font-bold" style={{color}}>{pct}%</span>
+                            </div>
+                          </div>
+                          <div className="w-full h-2.5 rounded-full" style={{background:'#1e293b'}}>
+                            <div className="h-2.5 rounded-full transition-all duration-500" style={{width:`${Math.min(100,pct)}%`,background:color}}/>
+                          </div>
+                          {((mod.cant_prog||0)-(mod.cant_entr||0))>0&&<div className="text-xs text-gray-700 mt-0.5 text-right">{((mod.cant_prog||0)-(mod.cant_entr||0)).toLocaleString('es-PE')} pend.</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-gray-600">
+                    <div className="text-2xl mb-2">📦</div>
+                    <div className="text-xs">Sin datos de cantidades</div>
                   </div>
                 )
-              })}
+              )}
+
+              {chartTab==='distribucion' && (
+                <div>
+                  <div className="flex items-start gap-4 mb-3">
+                    <div className="flex-shrink-0">
+                      <Donut segs={segG} size={130} grosor={24} centro={<>
+                        <div className="text-xl font-bold font-mono text-white leading-none">{pctG}%</div>
+                        <div className="text-xs text-gray-500 mt-0.5">cumplidos</div>
+                        <div style={{fontSize:10}} className="text-gray-600">{global.cumplidos}/{global.total}</div>
+                      </>}/>
+                    </div>
+                    <div className="flex-1 space-y-2 min-w-0">
+                      {segG.map(s=>{
+                        const pct=global.total>0?Math.round(s.n/global.total*100):0
+                        return (
+                          <div key={s.label}>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <div style={{width:7,height:7,borderRadius:2,background:s.color,flexShrink:0}}/>
+                                <span style={{fontSize:10,color:'#9ca3af'}}>{s.label}</span>
+                              </div>
+                              <span style={{fontSize:10,color:s.color,fontFamily:'monospace',fontWeight:700}}>{s.n}</span>
+                            </div>
+                            <div style={{height:4,background:'#1f2937',borderRadius:2,overflow:'hidden'}}>
+                              <div style={{width:`${pct}%`,height:'100%',background:s.color,borderRadius:2,transition:'width 0.4s'}}/>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <Bar segs={segG} total={global.total} h={7}/>
+                </div>
+              )}
+
+              {chartTab==='semanas' && <SemanaChart data={xSemG}/>}
             </div>
-          </div>
-        )}
 
-        {/* Semanas + Urgentes */}
-        <div className="grid gap-4" style={{gridTemplateColumns:'1fr 340px'}}>
-          <div className="card" style={{overflow:'visible'}}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">📅 Evolución por semana</div>
-              <Tooltip content="Una línea por estado. Pasa el mouse sobre los puntos para ver el detalle por semana."><span className="text-xs text-gray-600 cursor-help">ℹ️</span></Tooltip>
-            </div>
-            <div className="mt-2">
-              <SemanaChart data={xSemG}/>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">⚠️ Alertas urgentes</div>
-              {urgentes.length>0&&<span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{background:'#1c0101',color:'#f87171',border:'1px solid #7f1d1d'}}>{urgentes.length}</span>}
-            </div>
-            {urgentes.length===0?(
-              <div className="flex flex-col items-center justify-center py-8 text-gray-600"><div className="text-3xl mb-2">✅</div><div className="text-xs">Sin alertas urgentes</div></div>
-            ):(
-              <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                {urgentes.map(ot=>{
-                  const dias=getDiasRestantes(ot.fecha_limite_expedientes)
-                  const urg=ot.estado===5?C[5]:C[4]
-                  // ── Helpers de metas ───────────────────────────────────────
-  function getMeta(modulo_id, tipo, referencia) {
-    return metas.find(m => m.modulo_id === modulo_id && m.tipo === tipo && m.referencia === referencia)
-  }
-
-  function getMetasDelModulo(modulo_id, per) {
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7) // YYYY-MM
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const todas = [
-      { tipo:'semestral', ref: per,        label: `Semestral ${per}` },
-      { tipo:'anual',     ref: anio,       label: `Anual ${anio}` },
-      { tipo:'mensual',   ref: mesActual,  label: `Mensual ${mesActual}` },
-      { tipo:'semanal',   ref: semActual,  label: `Semanal ${semActual}` },
-    ].map(m => ({ ...m, meta: getMeta(modulo_id, m.tipo, m.ref) }))
-      .filter(m => m.meta)
-    // Si hay verPor activo, mostrar solo esa vista primero + las demás
-    if (verPor && todas.find(m=>m.tipo===verPor)) {
-      return [todas.find(m=>m.tipo===verPor), ...todas.filter(m=>m.tipo!==verPor)]
-    }
-    return todas
-  }
-
-  async function abrirModalMeta(mod) {
-    const per = periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    setMetaForm({
-      semestral: getMeta(mod.id,'semestral',per)?.cantidad || '',
-      anual:     getMeta(mod.id,'anual',anio)?.cantidad || '',
-      mensual:   getMeta(mod.id,'mensual',mesActual)?.cantidad || '',
-      semanal:   getMeta(mod.id,'semanal',semActual)?.cantidad || '',
-    })
-    setModalMeta({ modulo_id: mod.id, modulo_nombre: mod.nombre, modulo_icono: mod.icono, periodo: per })
-  }
-
-  async function guardarMetas() {
-    if (!modalMeta) return
-    setGuardandoMeta(true)
-    const per  = modalMeta.periodo
-    const anio = per?.split('-')[0] || ''
-    const mesActual = new Date().toISOString().slice(0,7)
-    const semActual = (() => {
-      const d = new Date(); const start = new Date(d.getFullYear(),0,1)
-      return 'S' + String(Math.ceil(((d-start)/86400000+start.getDay()+1)/7)).padStart(2,'0')
-    })()
-    const items = [
-      { tipo:'semestral', ref:per,        val:metaForm.semestral },
-      { tipo:'anual',     ref:anio,       val:metaForm.anual },
-      { tipo:'mensual',   ref:mesActual,  val:metaForm.mensual },
-      { tipo:'semanal',   ref:semActual,  val:metaForm.semanal },
-    ]
-    for (const item of items) {
-      const cant = parseInt(item.val)
-      const existing = getMeta(modalMeta.modulo_id, item.tipo, item.ref)
-      if (!isNaN(cant) && cant > 0) {
-        if (existing) {
-          await supabase.from('metas').update({ cantidad: cant }).eq('id', existing.id)
-        } else {
-          await supabase.from('metas').insert({ modulo_id: modalMeta.modulo_id, periodo: per, tipo: item.tipo, referencia: item.ref, cantidad: cant })
-        }
-      } else if (existing) {
-        // Si se borró el valor, eliminar la meta
-        await supabase.from('metas').delete().eq('id', existing.id)
-      }
-    }
-    // Recargar metas
-    const { data: nuevasMetas } = await supabase.from('metas').select('*')
-    setMetas(nuevasMetas || [])
-    setGuardandoMeta(false)
-    setModalMeta(null)
-  }
-
-  return (
-                    <Tooltip key={ot.id} content={<>
-                      <div className="font-bold text-white">{ot._mod?.icono} {ot._mod?.nombre}</div>
-                      {ot._cont&&<div className="text-gray-400 text-xs mt-0.5">{ot._cont.nombre}</div>}
-                      <div className="mt-1 space-y-0.5">
-                        <div className="flex justify-between gap-3"><span className="text-gray-500">Límite:</span><span className="font-mono">{fmtFecha(ot.fecha_limite_expedientes)}</span></div>
-                        {ot.actividad&&<div className="flex justify-between gap-3"><span className="text-gray-500">Actividad:</span><span>{ot.actividad}</span></div>}
-                      </div>
-                    </>}>
-                      <div className="p-2.5 rounded-lg border cursor-pointer hover:border-gray-500 transition-all" style={{background:'#0d1526',borderColor:ot.estado===5?'#3b0a0a':'#2c1f00'}}>
+            {/* Alertas urgentes */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">⚠️ Alertas urgentes</div>
+                {urgentes.length>0&&<span className="text-xs font-mono font-bold px-2 py-0.5 rounded" style={{background:'#1c0101',color:'#f87171',border:'1px solid #7f1d1d'}}>{urgentes.length}</span>}
+              </div>
+              {urgentes.length===0?(
+                <div className="flex flex-col items-center justify-center py-6 text-gray-600"><div className="text-2xl mb-2">✅</div><div className="text-xs">Sin alertas urgentes</div></div>
+              ):(
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                  {urgentes.map(ot=>{
+                    const dias=getDiasRestantes(ot.fecha_limite_expedientes)
+                    const urg=ot.estado===5?C[5]:C[4]
+                    return (
+                      <div key={ot.id} className="p-2.5 rounded-lg border cursor-pointer hover:border-gray-500 transition-all" style={{background:'#0d1526',borderColor:ot.estado===5?'#3b0a0a':'#2c1f00'}}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="text-xs font-semibold text-gray-200">{ot._mod?.icono} {ot._mod?.nombre}{ot.numero_ot&&<span className="text-gray-500"> · #{ot.numero_ot}</span>}</div>
@@ -1977,11 +1721,12 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    </Tooltip>
-                  )
-                })}
-              </div>
-            )}
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
       </>)}
