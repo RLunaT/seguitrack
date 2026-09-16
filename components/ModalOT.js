@@ -20,6 +20,7 @@ const OFFSETS_POR_FAMILIA = {
   'reemplazos de medidores p-227': { inicio: 5, fin: 5, limite: 4 },
 }
 function getOffsets(modulo) {
+  if (Number(modulo?.id) === 95) return { inicio: 1, fin: 15, limite: 2 }
   return OFFSETS_POR_FAMILIA[claveGrupo(modulo?.nombre)] || null
 }
 
@@ -435,7 +436,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       numero_ot:          String(payload.numero_ot || payload.nr || ''),
       codigo_ot:          String(de.doc_codigo_ot || generarCodigoOT(payload.semana, periodo) || ''),
       contrato:           limpiarContrato(cont?.contrato || ''),
-      fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || hoy),
+      fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || (Number(modulo?.id) !== 95 ? hoy : '')),
       fecha_inicio:       fmtDia(payload.fecha_inicio),
       fecha_fin:          fmtDia(fechaFinW),
       fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
@@ -518,7 +519,7 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
       numero_ot:          String(payload.numero_ot || payload.nr || ''),
       codigo_ot:          String(de.doc_codigo_ot || generarCodigoOT(payload.semana, periodo) || ''),
       contrato:           limpiarContrato(cont?.contrato || ''),
-      fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || hoy),
+      fecha_entrega:      fmtEntrega(de.doc_fecha_entrega || (Number(modulo?.id) !== 95 ? hoy : '')),
       fecha_inicio:       fmtDia(payload.fecha_inicio),
       fecha_fin:          fmtDia(fechaFinP),
       fecha_limite:       fmtDia(payload.fecha_limite_expedientes),
@@ -743,11 +744,29 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   {/* Preview */}
                   {preview && form.fecha_limite_expedientes && (
                     <div className="p-3 rounded-lg bg-gray-900 border border-gray-800 space-y-2">
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div><span className="text-gray-600">Progreso</span><div className="font-mono font-bold text-blue-400">{Math.round((preview.progreso||0)*100)}%</div></div>
-                        <div><span className="text-gray-600">Plazo</span><div className="font-mono font-bold text-gray-200">{preview.dias_plazo ?? '—'} días</div></div>
-                        <div><span className="text-gray-600">Estado</span><div className="font-bold" style={{color:[,'#22c55e','#f97316','#3b82f6','#eab308','#ef4444'][preview.estado]||'#6b7280', fontSize:11}}>{['','✓ A tiempo','⚠ Tarde','● En proceso','⚡ Por vencer','✗ Fuera'][preview.estado]||'—'}</div></div>
-                      </div>
+                      {Number(modulo?.id) === 95 && form.fecha_inicio && form.fecha_fin_trabajos ? (() => {
+                        const daysDoc = Math.round((new Date(form.fecha_fin_trabajos + 'T00:00:00') - new Date(form.fecha_inicio + 'T00:00:00')) / 86400000) + 1
+                        return (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="rounded-xl p-3 text-center" style={{background:'linear-gradient(135deg,#0f2027,#203a43)',border:'1px solid #1e4d6b'}}>
+                              <div className="text-xs text-blue-400 font-semibold mb-1 uppercase tracking-wider">Plazo sistema</div>
+                              <div className="text-2xl font-black text-white font-mono">{preview.dias_plazo ?? '—'}</div>
+                              <div className="text-xs text-blue-300 mt-0.5">días hasta límite</div>
+                            </div>
+                            <div className="rounded-xl p-3 text-center" style={{background:'linear-gradient(135deg,#0f2a1a,#1a3a2a)',border:'1px solid #1a5c35'}}>
+                              <div className="text-xs text-emerald-400 font-semibold mb-1 uppercase tracking-wider">Plazo ejecución</div>
+                              <div className="text-2xl font-black font-mono" style={{color:'#34d399'}}>{isNaN(daysDoc) || daysDoc < 1 ? '—' : daysDoc}</div>
+                              <div className="text-xs text-emerald-300 mt-0.5">días de trabajo (doc.)</div>
+                            </div>
+                          </div>
+                        )
+                      })() : (
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div><span className="text-gray-600">Progreso</span><div className="font-mono font-bold text-blue-400">{Math.round((preview.progreso||0)*100)}%</div></div>
+                          <div><span className="text-gray-600">Plazo</span><div className="font-mono font-bold text-gray-200">{preview.dias_plazo ?? '—'} días</div></div>
+                          <div><span className="text-gray-600">Estado</span><div className="font-bold" style={{color:[,'#22c55e','#f97316','#3b82f6','#eab308','#ef4444'][preview.estado]||'#6b7280', fontSize:11}}>{['','✓ A tiempo','⚠ Tarde','● En proceso','⚡ Por vencer','✗ Fuera'][preview.estado]||'—'}</div></div>
+                        </div>
+                      )}
                       <div>
                         <label className="text-xs text-gray-600 block mb-1">Semana <span className="text-gray-700">(calculada automáticamente, editable)</span></label>
                         <select className="input-base text-xs" value={form.semana} onChange={e=>setField('semana', e.target.value)}>
@@ -786,26 +805,26 @@ export default function ModalOT({ modulo, contratistas, camposExtra, actividades
                   <p className="text-xs text-gray-500 mb-2">Estos datos se usarán para generar el documento Word. Puedes dejar los campos vacíos para usar los valores del módulo.</p>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
+                    {Number(modulo?.id) !== 95 && <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Código OT</label>
                       <input className="input-base" placeholder={generarCodigoOT(form.semana, periodo, { motivo: form.motivo_ot, fechaInicio: form.fecha_inicio }) || 'EPU07IP26'} name="p3_doc_codigo_ot" autoComplete="off"
                         value={form.datos_extra['doc_codigo_ot']||''} onChange={e=>setExtra('doc_codigo_ot',e.target.value)}/>
-                    </div>
-                    <div>
+                    </div>}
+                    {Number(modulo?.id) !== 95 && <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Plazo de ejecución (doc.)</label>
                       <input className="input-base" type="number" placeholder="1" name="p3_doc_dias_plazo" autoComplete="off"
                         value={form.datos_extra['doc_dias_plazo']||''} onChange={e=>setExtra('doc_dias_plazo',e.target.value)}/>
-                    </div>
+                    </div>}
                     <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma — Contratista</label>
                       <input className="input-base" placeholder={cont?.nombre||'—'} name="p3_doc_contratista_firma" autoComplete="off"
                         value={form.datos_extra['doc_contratista_firma']||''} onChange={e=>setExtra('doc_contratista_firma',e.target.value)}/>
                     </div>
-                    <div>
+                    {Number(modulo?.id) !== 95 && <div>
                       <label className="text-xs font-semibold text-gray-400 block mb-1">Firma 4 <span className="text-gray-600">(si aplica)</span></label>
                       <input className="input-base" placeholder="Opcional" name="p3_doc_firma4" autoComplete="off"
                         value={form.datos_extra['doc_firma4']||''} onChange={e=>setExtra('doc_firma4',e.target.value)}/>
-                    </div>
+                    </div>}
                     <div className="col-span-2">
                       <label className="text-xs font-semibold text-gray-400 block mb-2">Versión del documento</label>
                       <div className="flex gap-2">

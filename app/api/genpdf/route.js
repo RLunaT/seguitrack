@@ -379,6 +379,7 @@ export async function POST(request) {
     const data = {
       ot:  rawData.numero_ot          || '',
       sk:  (() => {
+             if (Number(modulo_id) === 95) return 'EPU-DGCM'
              const mx = (rawData.motivo_extra || rawData.motivo_ot || '').toUpperCase().trim()
              if (mx === 'NTCSE RURAL' || mx === 'NTCSE URBANO') {
                const fi = rawData.fecha_inicio_raw || ''
@@ -396,9 +397,13 @@ export async function POST(request) {
       t3:  rawData.fecha_limite       || '',
       pz:  esContraste
              ? (plazoCalculado || rawData.plazo_ejecucion || '')
-             : (rawData.dias_plazo || ''),
+             : Number(modulo_id) === 95
+               ? (plazoCalculado || rawData.dias_plazo || '')
+               : (rawData.dias_plazo || ''),
       cn:  rawData.cantidad           || '',
-      ac:  rawData.actividad_doc      || rawData.actividad_label || '',
+      ac:  Number(modulo_id) === 95
+             ? '1.7;3.1; 4.6 ; 4.14'
+             : (rawData.actividad_doc || rawData.actividad_label || ''),
       te:  rawData.fecha_entrega      || '',
       ct:  (rawData.contrato || '').replace(/^contrato\s+/i, '').replace(/^N[.]?[°º]\s*/i, '').trim(),
       cm:  rawData.cumplimiento       || (() => {
@@ -423,8 +428,9 @@ export async function POST(request) {
 
     // Mismo mapeo de plantillas que usa Word — seleccionar NTCSE según motivo_ot
     const TEMPLATE_POR_MODULO = {
-      2: 'template_avisos.docx',
-      3: 'template_reemplazo.docx',
+      2:  'template_avisos.docx',
+      3:  'template_reemplazo.docx',
+      95: 'template_notificacion_colectivos.docx',
     }
     let templateName = TEMPLATE_POR_MODULO[modulo_id]
     if (Number(modulo_id) === 1 || actividad === 'Contraste' || actividad === 'Contrastes') {
