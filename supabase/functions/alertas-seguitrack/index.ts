@@ -172,6 +172,45 @@ function construirMensaje(
   return lineas.join('\n')
 }
 
+// ── Construir mensaje consolidado con todas las OTs pendientes ──
+function construirMensajeConsolidado(
+  pendientes: Array<{ ot: any; modulo: any; tipo: string; dias: number }>
+): string {
+  const prioridad = { fuera: 0, vencimiento: 1, critico: 2, alerta: 3 }
+  const ordenados = [...pendientes].sort((a, b) => (prioridad[a.tipo] ?? 9) - (prioridad[b.tipo] ?? 9))
+
+  const emojiTipo = { fuera: '🚨', vencimiento: '🔴', critico: '⚠️', alerta: '📢' }
+  const labelTipo = {
+    fuera:       'FUERA DE PLAZO',
+    vencimiento: 'VENCE HOY',
+    critico:     'CRÍTICO',
+    alerta:      'ALERTA',
+  }
+
+  const lineas: string[] = [
+    `📋 *SeguiTrack — ${ordenados.length} OT(s) requieren atención*`,
+    ``,
+  ]
+
+  for (const { ot, modulo, tipo, dias } of ordenados) {
+    const emoji = emojiTipo[tipo] || '📢'
+    const label = labelTipo[tipo] || tipo.toUpperCase()
+    const diasStr = dias < 0
+      ? `vencida hace ${Math.abs(dias)} día(s)`
+      : dias === 0 ? 'vence HOY'
+      : `vence en ${dias} día(s)`
+
+    lineas.push(`${emoji} *[${label}]* ${modulo?.icono || ''} ${modulo?.nombre || ''}`)
+    if (ot.numero_ot) lineas.push(`   OT N°: ${ot.numero_ot}`)
+    if (ot.actividad) lineas.push(`   Actividad: ${ot.actividad}`)
+    lineas.push(`   Fecha límite: ${fmtFecha(ot.fecha_limite_expedientes)} — ${diasStr}`)
+    lineas.push(``)
+  }
+
+  lineas.push(`Ingresa a SeguiTrack para gestionar estas OTs.`)
+  return lineas.join('\n')
+}
+
 // ── HANDLER PRINCIPAL ─────────────────────────────────────────
 Deno.serve(async (_req) => {
   const ahora = new Date().toISOString()
@@ -204,40 +243,40 @@ Deno.serve(async (_req) => {
     let totalEnviados = 0
     let totalOmitidos = 0
 
-    // 2. Por cada destinatario
+    // 2. Por cada destinatario — agrupar todas las OTs en UN solo mensaje
     for (const cfg of (configs || [])) {
       if (!cfg.notif_whatsapp || !cfg.whatsapp) continue
 
       const diasAlerta  = cfg.dias_alerta  || 7
       const diasCritico = cfg.dias_critico || 3
 
-      // 3. Por cada OT con fecha límite
+      // Recopilar OTs pendientes para este destinatario
+      type OtPendiente = { ot: any; modulo: any; tipo: string; dias: number }
+      const pendientes: OtPendiente[] = []
+
       for (const ot of (ots || [])) {
         if (!ot.fecha_limite_expedientes) continue
 
-        // Ignorar OTs ya completadas (con fecha_reporte dentro del plazo)
-        if (ot.fecha_reporte) {
-          const rep = new Date(ot.fecha_reporte + 'T00:00:00')
-          const lim = new Date(ot.fecha_limite_expedientes + 'T00:00:00')
-          if (rep <= lim) continue  // cumplió a tiempo → no notificar
-          // cumplió tarde: tampoco notificar, ya cerrada
-          continue
-        }
+        if (ot.fecha_reporte) continue  // ya cerrada (a tiempo o tarde)
 
-        const dias  = diasRestantes(ot.fecha_limite_expedientes)
-        const tipo  = clasificarAlerta(dias, diasAlerta, diasCritico)
-
+        const dias = diasRestantes(ot.fecha_limite_expedientes)
+        const tipo = clasificarAlerta(dias, diasAlerta, diasCritico)
         if (!tipo) { totalOmitidos++; continue }
 
-        // Control de duplicados
         const duplicado = await yaNotificado(ot.id, cfg.whatsapp, tipo)
         if (duplicado) { totalOmitidos++; continue }
 
-        // Construir y enviar
-        const modulo  = moduloMap[ot.modulo_id]
-        const mensaje = construirMensaje(ot, modulo, tipo, dias)
-        const result  = await enviarWhatsApp(cfg.whatsapp, mensaje)
+        pendientes.push({ ot, modulo: moduloMap[ot.modulo_id], tipo, dias })
+      }
 
+      if (pendientes.length === 0) continue
+
+      // Construir UN mensaje consolidado con todas las OTs
+      const mensaje = construirMensajeConsolidado(pendientes)
+      const result  = await enviarWhatsApp(cfg.whatsapp, mensaje)
+
+      // Registrar un log por cada OT incluida
+      for (const { ot, tipo } of pendientes) {
         await registrarLog({
           ot_id:        ot.id,
           tipo,
@@ -245,16 +284,16 @@ Deno.serve(async (_req) => {
           destinatario: cfg.whatsapp,
           exitoso:      result.ok,
           detalle:      result.detalle,
-          ots_count:    1,
+          ots_count:    pendientes.length,
           mensaje:      mensaje.slice(0, 500),
         })
-
-        if (result.ok) totalEnviados++
-        else totalOmitidos++
-
-        // Pausa entre envíos para no sobrecargar CallMeBot (límite ~20/min)
-        await new Promise(r => setTimeout(r, 3500))
       }
+
+      if (result.ok) totalEnviados += pendientes.length
+      else totalOmitidos += pendientes.length
+
+      // Pausa entre usuarios (no entre OTs)
+      await new Promise(r => setTimeout(r, 3000))
     }
 
     const resumen = { ok: true, enviados: totalEnviados, omitidos: totalOmitidos, ejecutadoEn: ahora }
