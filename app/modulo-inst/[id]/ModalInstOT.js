@@ -102,6 +102,8 @@ const FORM_DEFAULT = {
   cant_inst:      '',
   obs_fact:       '',
   obs_inst:       '',
+  detalle_fact:   '',
+  detalle_inst:   '',
   fecha_reporte_fact: '',
   fecha_reporte_inst: '',
   cant_ent_fact:  '',
@@ -182,6 +184,8 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
         cant_inst:          String(inst?.cantidad_programada || ''),
         obs_fact:           fact.observaciones || '',
         obs_inst:           inst?.observaciones || '',
+        detalle_fact:       fact.datos_extra?.detalle_fact || '',
+        detalle_inst:       inst?.datos_extra?.detalle_inst || '',
         fecha_reporte_fact: fact.fecha_reporte || '',
         fecha_reporte_inst: inst?.fecha_reporte || '',
         cant_ent_fact:      String(fact.cantidad_entregada || ''),
@@ -268,8 +272,13 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       contrato:       form.contrato,
       numero_ot:      parseInt(form.numero_ot) || form.numero_ot,
       periodo:        anioActivo || String(new Date().getFullYear()),
-      datos_extra:    { doc_fecha_entrega: form.fecha_entrega },
     }
+
+    const extraFact = { doc_fecha_entrega: form.fecha_entrega }
+    if (form.detalle_fact) extraFact.detalle_fact = form.detalle_fact
+
+    const extraInst = { doc_fecha_entrega: form.fecha_entrega }
+    if (form.detalle_inst) extraInst.detalle_inst = form.detalle_inst
 
     const otFact = {
       ...baseOT,
@@ -279,6 +288,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       fecha_fin_trabajos:    form.ff_fact_manual || fechas.fact?.fin || null,
       fecha_limite_expedientes: form.fl_fact_manual || fechas.fact?.limite || null,
       observaciones:         form.obs_fact || null,
+      datos_extra:           extraFact,
     }
 
     const otInst = {
@@ -289,6 +299,7 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       fecha_fin_trabajos:    form.ff_inst_manual || fechas.inst?.fin || null,
       fecha_limite_expedientes: form.fl_inst_manual || fechas.inst?.limite || null,
       observaciones:         form.obs_inst || null,
+      datos_extra:           extraInst,
     }
 
     try {
@@ -649,6 +660,11 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
                 <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
                   placeholder="Opcional..." value={form.obs_fact} onChange={e => set('obs_fact', e.target.value)} />
               </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Detalle OT</label>
+                <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-cyan-500"
+                  placeholder="Adjunto listado OT por correo electrónico" value={form.detalle_fact} onChange={e => set('detalle_fact', e.target.value)} />
+              </div>
             </div>
           </div>
 
@@ -718,6 +734,11 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
                 <label className="text-xs text-gray-500 block mb-1">Observaciones</label>
                 <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-purple-500"
                   placeholder="Opcional..." value={form.obs_inst} onChange={e => set('obs_inst', e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Detalle OT</label>
+                <input className="w-full px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900 text-gray-300 text-xs outline-none focus:border-purple-500"
+                  placeholder="Adjunto listado OT por correo electrónico" value={form.detalle_inst} onChange={e => set('detalle_inst', e.target.value)} />
               </div>
             </div>
           </div>

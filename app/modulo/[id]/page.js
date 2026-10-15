@@ -1872,7 +1872,7 @@ function ModalDescarga({ status, onClose }) {
   const listo = status === 'word-ok' || status === 'pdf-ok'
   const error = status === 'error'
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div className="rounded-2xl border p-8 flex flex-col items-center gap-4 text-center"
         style={{ background: '#0f1a2e', borderColor: error ? '#991b1b' : listo ? '#166534' : '#0e7490', minWidth: 280, maxWidth: 360 }}>
         {!listo && !error && (

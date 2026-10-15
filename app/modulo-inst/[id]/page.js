@@ -44,6 +44,7 @@ const CAMPOS_BASE = [
   { key: 'numero_registro',    label: 'N° OT',           always: true  },
   { key: 'contratista',        label: 'Contratista',     always: true  },
   { key: 'contrato',           label: 'N° Contrato',     always: false },
+  { key: 'detalle_ot',         label: 'Detalle OT',      always: false },
   { key: 'actividad',          label: 'Actividad',       always: true  },
   { key: 'fecha_entrega_ot',   label: 'F. Entrega OT',   always: true  },
   { key: 'fecha_inicio',       label: 'F. Inicio',       always: true  },
@@ -897,7 +898,15 @@ export default function ModuloPage() {
     const nuevo = { ...colsVisibles, [key]: true }
     setColsVisibles(nuevo)
     localStorage.setItem(`cols_${id}`, JSON.stringify(nuevo))
-    const arr = [...camposOrden, { key, label: col.label }]
+    // Insertar en la posición que le corresponde según CAMPOS_BASE
+    const baseIdx = CAMPOS_BASE.findIndex(c => c.key === key)
+    const arr = [...camposOrden]
+    let insertAt = arr.length
+    for (let i = 0; i < arr.length; i++) {
+      const pos = CAMPOS_BASE.findIndex(c => c.key === arr[i].key)
+      if (pos > baseIdx) { insertAt = i; break }
+    }
+    arr.splice(insertAt, 0, { key, label: col.label })
     setCamposTabOrder(arr)
     guardarOrdenCampos(arr)
   }
@@ -1264,6 +1273,7 @@ export default function ModuloPage() {
                                 if (k === 'fecha_fin_trabajos') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.fecha_fin_trabajos)}</td>
                                 if (k === 'fecha_limite') return <td key={k} className="font-mono text-xs font-semibold">{fmtFecha(ot.fecha_limite_expedientes)}</td>
                                 if (k === 'fecha_entrega_ot') return <td key={k} className="font-mono text-xs">{fmtFecha(ot.datos_extra?.doc_fecha_entrega)}</td>
+                                if (k === 'detalle_ot') { const det = ot.actividad === act1 ? (ot.datos_extra?.detalle_fact || '') : (ot.datos_extra?.detalle_inst || ''); return <td key={k} className="text-xs text-gray-400" title={det}><span className="block truncate max-w-[180px]">{det || '—'}</span></td> }
                                 if (k === 'dias_plazo') return <td key={k} className="text-center font-mono text-xs">{ot.dias_plazo??'—'}</td>
                                 if (k === 'cantidad') return <td key={k} className="text-center text-xs">{ot.cantidad_programada??'—'}</td>
                                 if (k === 'cantidad_entregada') {
@@ -2552,7 +2562,7 @@ function ModalDescarga({ status, onClose }) {
   const listo = status === 'word-ok' || status === 'pdf-ok'
   const error = status === 'error'
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div className="rounded-2xl border p-8 flex flex-col items-center gap-4 text-center"
         style={{ background: '#0f1a2e', borderColor: error ? '#991b1b' : listo ? '#166534' : '#0e7490', minWidth: 280, maxWidth: 360 }}>
         {/* Icono */}

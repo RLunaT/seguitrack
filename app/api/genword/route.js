@@ -205,6 +205,7 @@ export async function POST(request) {
       cr:  rawData.coordinador        || 'CONSORCIO SUPERVISOR',
       co:  rawData.contratista_nombre || '',
       mx:  rawData.motivo_extra       || rawData.motivo_ot || '',
+      item: (() => { const n = extraerItem(rawData.contratista_nombre); return n ? 'ÍTEM ' + n : '' })(),
       semana:   rawData.semana   || '',
       periodo:  rawData.periodo  || '',
     }
