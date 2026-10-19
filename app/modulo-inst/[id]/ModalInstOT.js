@@ -156,19 +156,23 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
       setForm(p => ({ ...p, contratista_id: String(c.id), contrato: c.contrato || '' }))
     }
 
-    // Obtener el N° OT más alto activo en este módulo/período
+    // Obtener el N° OT más alto para este contratista en este módulo/período
     const periodo = anioActivo || String(new Date().getFullYear())
-    supabase
-      .from('ots')
-      .select('numero_ot')
-      .eq('modulo_id', parseInt(modulo.id))
-      .eq('periodo', periodo)
-      .is('deleted_at', null)
-      .then(({ data }) => {
-        if (!data?.length) return
-        const maxOT = Math.max(...data.map(o => parseInt(o.numero_ot) || 0))
-        if (maxOT > 0) setForm(p => ({ ...p, numero_ot: String(maxOT + 1) }))
-      })
+    const contratistaDefault = contratistas[0]
+    if (contratistaDefault) {
+      supabase
+        .from('ots')
+        .select('numero_ot')
+        .eq('modulo_id', parseInt(modulo.id))
+        .eq('periodo', periodo)
+        .eq('contratista_id', contratistaDefault.id)
+        .is('deleted_at', null)
+        .then(({ data }) => {
+          if (!data?.length) return
+          const maxOT = Math.max(...data.map(o => parseInt(o.numero_ot) || 0))
+          if (maxOT > 0) setForm(p => ({ ...p, numero_ot: String(maxOT + 1) }))
+        })
+    }
   }, [esEdicion, modulo?.id, contratistas, anioActivo])
 
   useEffect(() => {

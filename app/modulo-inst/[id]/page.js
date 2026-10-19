@@ -234,6 +234,9 @@ export default function ModuloPage() {
 
   useEffect(() => { cargar() }, [cargar])
 
+  // Precalentar Gotenberg al entrar al módulo para que el primer PDF sea rápido
+  useEffect(() => { fetch('/api/ping-gotenberg').catch(() => {}) }, [])
+
   // Auto-scroll al último registro cuando cargan los datos
   useEffect(() => {
     if (ots.length > 0) {
@@ -536,11 +539,11 @@ export default function ModuloPage() {
 
   // Genera y descarga el Word directamente sin mostrar modal
   async function generarWordDirecto(ot) {
-    // Buscar el par completo de actividades para esta OT
+    // Buscar el par completo de actividades para esta OT (mismo contratista)
     const numeroOt = ot.numero_ot
-    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
-    // Si no existe el registro de ejecución (OT creada antes del fix), usar fact como fallback
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2) || fact
+    const cid = ot.contratista_id
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.contratista_id === cid && o.actividad === act1) || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.contratista_id === cid && o.actividad === act2) || fact
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -600,6 +603,8 @@ export default function ModuloPage() {
       plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos) || '---',
       cant_inst:    String(inst?.cantidad_programada ?? '0'),
       detalle_inst: inst?.datos_extra?.detalle_inst || 'Adjunto listado OT por correo electrónico',
+      show_fact:    (fact.cantidad_programada || 0) > 0,
+      show_inst:    (inst?.cantidad_programada || 0) > 0,
     }
 
     // Determinar qué template usar (reubicación, individualización o estándar)
@@ -638,9 +643,9 @@ export default function ModuloPage() {
   // de origen que generarWordDirecto, mismo manejo de nombre de archivo.
   async function generarPdfDirecto(ot) {
     const numeroOt = ot.numero_ot
-    const fact = ots.find(o => o.numero_ot === numeroOt && o.actividad === act1) || ot
-    // Si no existe el registro de ejecución (OT creada antes del fix), usar fact como fallback
-    const inst = ots.find(o => o.numero_ot === numeroOt && o.actividad === act2) || fact
+    const cid = ot.contratista_id
+    const fact = ots.find(o => o.numero_ot === numeroOt && o.contratista_id === cid && o.actividad === act1) || ot
+    const inst = ots.find(o => o.numero_ot === numeroOt && o.contratista_id === cid && o.actividad === act2) || fact
     const cont = contratistas.find(c => c.id === ot.contratista_id)
 
     const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
@@ -690,6 +695,8 @@ export default function ModuloPage() {
       plazo_inst:   diasHab(inst?.fecha_inicio, inst?.fecha_fin_trabajos) || '---',
       cant_inst:    String(inst?.cantidad_programada ?? '0'),
       detalle_inst: inst?.datos_extra?.detalle_inst||'Adjunto listado OT por correo electrónico',
+      show_fact:    (fact.cantidad_programada || 0) > 0,
+      show_inst:    (inst?.cantidad_programada || 0) > 0,
     }
     const esIndividualizacion = !!(fact.datos_extra?.detalle_fact && fact.datos_extra.detalle_fact !== 'Adjunto listado OT por correo electrónico')
     const esReubicacion = act2 === 'ejecucion'
@@ -1196,14 +1203,14 @@ export default function ModuloPage() {
                     {otsFiltradas.length === 0 ? (
                       <tr><td colSpan={30} className="text-center py-12 text-gray-600">Sin registros. Haz clic en "+ Nuevo Registro".</td></tr>
                     ) : (() => {
-                      // Agrupar por numero_ot para hacer rowspan
+                      // Agrupar por (numero_ot, contratista_id) para hacer rowspan
                       const grupos = []
                       const vistos = new Set()
                       for (const ot of otsFiltradas) {
-                        const key = String(ot.numero_ot)
+                        const key = `${ot.numero_ot}__${ot.contratista_id}`
                         if (!vistos.has(key)) {
                           vistos.add(key)
-                          const parOTs = otsFiltradas.filter(o => String(o.numero_ot) === key)
+                          const parOTs = otsFiltradas.filter(o => String(o.numero_ot) === String(ot.numero_ot) && o.contratista_id === ot.contratista_id)
                           grupos.push(parOTs)
                         }
                       }
@@ -1212,7 +1219,11 @@ export default function ModuloPage() {
                         const inst = par.find(o => o.actividad === act2)
                         const ref = fact || inst
                         if (!ref) return []
-                        const rowSpan = fact && inst ? 2 : 1
+                        // Ocultar filas con cantidad = 0
+                        const mostrarFact = (fact?.cantidad_programada || 0) > 0
+                        const mostrarInst = (inst?.cantidad_programada || 0) > 0
+                        const rowsVisibles = [mostrarFact ? fact : null, mostrarInst ? inst : null].filter(Boolean)
+                        const rowSpan = rowsVisibles.length || 1
                         const borderBottom = '2px solid #1e3a5f'
 
                         const celdaSpan = (content, extraStyle = {}) => (
@@ -1221,9 +1232,9 @@ export default function ModuloPage() {
                           </td>
                         )
 
-                        return [fact, inst].filter(Boolean).map((ot, idx) => {
+                        return rowsVisibles.map((ot, idx) => {
                           const esFirst = idx === 0
-                          const esLast = idx === (fact && inst ? 1 : 0)
+                          const esLast = idx === rowsVisibles.length - 1
                           const info = getEstadoInfo(ot.estado)
                           const pct = Math.round((ot.progreso || 0) * 100)
                           const efInfo = getEficienciaLabel(ot.eficiencia)
@@ -1592,7 +1603,7 @@ export default function ModuloPage() {
         <ModalInstOT
           modulo={modulo}
           contratistas={contratistas}
-          par={editando ? ots.filter(o => o.numero_ot === editando.numero_ot) : null}
+          par={editando ? ots.filter(o => o.numero_ot === editando.numero_ot && o.contratista_id === editando.contratista_id) : null}
           anioActivo={anioSelec}
           onClose={() => { setModalOpen(false); cargar() }}
           onSaved={(esNueva) => { if (!esNueva) { setModalOpen(false) }; cargar() }}

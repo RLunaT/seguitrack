@@ -5,7 +5,7 @@ import PizZip from 'pizzip'
 import Docxtemplater from 'docxtemplater'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 const GOTENBERG = process.env.GOTENBERG_URL || 'https://seguitrack-gotenberg.onrender.com'
 
@@ -127,8 +127,14 @@ async function aplicarOverlayReubicacion(pdfBuffer, vars) {
     size: fontSize, font: fontBold, color: rgb(0, 0, 0),
   })
 
-  // El texto "Contrato N.° ..." lo deja el propio documento — no se redibuja
-  // para evitar duplicados. Solo el OT box se reconstruye via overlay.
+  // Línea superior SUPERVISOR ZONAL — LibreOffice la rinde en gris; la sobreponemos en negro
+  // Posición desde anchor EMU: H=3252470, V=6969760, cx=4091940 → pt = EMU/12700
+  const supY = pageH - (6969760 / 12700)
+  page.drawLine({
+    start: { x: 3252470 / 12700, y: supY },
+    end:   { x: (3252470 + 4091940) / 12700, y: supY },
+    color: rgb(0, 0, 0), thickness: 0.75,
+  })
 
   return Buffer.from(await pdfDoc.save())
 }
@@ -144,6 +150,22 @@ export async function POST(request) {
 
     const buf = fs.readFileSync(templatePath)
     const zip = new PizZip(buf)
+
+    // Eliminar filas de la tabla cuya cantidad sea 0 antes de renderizar
+    const showFact = vars?.show_fact !== false && (vars?.show_fact === true || parseInt(vars?.cant_fact || '0') > 0)
+    const showInst = vars?.show_inst !== false && (vars?.show_inst === true || parseInt(vars?.cant_inst || '0') > 0)
+    if (!showFact || !showInst) {
+      const docXml = zip.files['word/document.xml']?.asText()
+      if (docXml) {
+        const filtered = docXml.replace(/<w:tr[ >][\s\S]*?<\/w:tr>/g, (row) => {
+          if (!showFact && row.includes('detalle_fact')) return ''
+          if (!showInst && row.includes('detalle_inst')) return ''
+          return row
+        })
+        zip.file('word/document.xml', filtered)
+      }
+    }
+
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,

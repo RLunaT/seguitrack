@@ -208,6 +208,9 @@ export default function ModuloPage() {
 
   useEffect(() => { cargar() }, [cargar])
 
+  // Precalentar Gotenberg al entrar al módulo
+  useEffect(() => { fetch('/api/ping-gotenberg').catch(() => {}) }, [])
+
   // Auto-scroll al último registro cuando cargan los datos
   useEffect(() => {
     if (ots.length > 0) {
