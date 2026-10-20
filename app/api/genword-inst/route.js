@@ -33,6 +33,7 @@ function prepararParaPDF(docxBuf, vars) {
   // Limita espaciado after de párrafo — LibreOffice agrega padding extra.
   fixed = fixed.replace(/w:after="(\d+)"/g, (m, val) => parseInt(val) > 80 ? 'w:after="40"' : m)
 
+
   // Procesar <w:drawing> con <wpg:wgp>:
   //   • DGCM-MC → eliminar (el overlay pdf-lib lo redibuja)
   //   • Contiene ">ITEM<" (bloque de firma) → limpiar el texto "ITEM XX"
@@ -127,15 +128,6 @@ async function aplicarOverlayReubicacion(pdfBuffer, vars) {
     size: fontSize, font: fontBold, color: rgb(0, 0, 0),
   })
 
-  // Línea superior SUPERVISOR ZONAL — LibreOffice la rinde en gris; la sobreponemos en negro
-  // Posición desde anchor EMU: H=3252470, V=6969760, cx=4091940 → pt = EMU/12700
-  const supY = pageH - (6969760 / 12700)
-  page.drawLine({
-    start: { x: 3252470 / 12700, y: supY },
-    end:   { x: (3252470 + 4091940) / 12700, y: supY },
-    color: rgb(0, 0, 0), thickness: 0.75,
-  })
-
   return Buffer.from(await pdfDoc.save())
 }
 
@@ -180,8 +172,21 @@ export async function POST(request) {
 
     const nombreBase = clientFilename || `OT-${String(vars?.numero_ot||'doc')}_Instalaciones_Nuevas`
 
+    // Para reubicación: normalizar w:w > 100 también en Word (igual que para PDF)
+    // El template tiene val="120" que en Word causa texto expandido y diseño descuidado
+    let finalWordBuf = wordBuf
+    if (template === 'template_reubicacion.docx') {
+      const wZip = new PizZip(wordBuf)
+      const wXml = wZip.files['word/document.xml']?.asText()
+      if (wXml) {
+        const norm = wXml.replace(/<w:w w:val="(\d+)"\/>/g, (m, v) => parseInt(v) > 100 ? '<w:w w:val="100"/>' : m)
+        wZip.file('word/document.xml', norm)
+        finalWordBuf = wZip.generate({ type: 'nodebuffer', compression: 'DEFLATE' })
+      }
+    }
+
     if (!pdf) {
-      return new NextResponse(wordBuf, {
+      return new NextResponse(finalWordBuf, {
         status: 200,
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

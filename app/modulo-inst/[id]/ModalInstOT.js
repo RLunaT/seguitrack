@@ -146,34 +146,31 @@ export default function ModalInstOT({ modulo, contratistas, par, onClose, onSave
   const [generandoDoc, setGenerandoDoc] = useState(false)
   const [docStatus, setDocStatus] = useState(null) // null | 'word-gen' | 'word-ok' | 'pdf-gen' | 'pdf-ok' | 'error'
 
-  // Al crear (no editar): auto-incrementar N° OT y auto-seleccionar contratista único
+  // Al crear: auto-seleccionar contratista único
   useEffect(() => {
     if (esEdicion || !modulo?.id) return
-
-    // Si hay exactamente un contratista, seleccionarlo y rellenar contrato
     if (contratistas.length === 1) {
       const c = contratistas[0]
       setForm(p => ({ ...p, contratista_id: String(c.id), contrato: c.contrato || '' }))
     }
+  }, [esEdicion, modulo?.id, contratistas])
 
-    // Obtener el N° OT más alto para este contratista en este módulo/período
+  // Al crear: recalcular N° OT cada vez que cambia el contratista seleccionado
+  useEffect(() => {
+    if (esEdicion || !modulo?.id || !form.contratista_id) return
     const periodo = anioActivo || String(new Date().getFullYear())
-    const contratistaDefault = contratistas[0]
-    if (contratistaDefault) {
-      supabase
-        .from('ots')
-        .select('numero_ot')
-        .eq('modulo_id', parseInt(modulo.id))
-        .eq('periodo', periodo)
-        .eq('contratista_id', contratistaDefault.id)
-        .is('deleted_at', null)
-        .then(({ data }) => {
-          if (!data?.length) return
-          const maxOT = Math.max(...data.map(o => parseInt(o.numero_ot) || 0))
-          if (maxOT > 0) setForm(p => ({ ...p, numero_ot: String(maxOT + 1) }))
-        })
-    }
-  }, [esEdicion, modulo?.id, contratistas, anioActivo])
+    supabase
+      .from('ots')
+      .select('numero_ot')
+      .eq('modulo_id', parseInt(modulo.id))
+      .eq('periodo', periodo)
+      .eq('contratista_id', parseInt(form.contratista_id))
+      .is('deleted_at', null)
+      .then(({ data }) => {
+        const maxOT = data?.length ? Math.max(...data.map(o => parseInt(o.numero_ot) || 0)) : 0
+        setForm(p => ({ ...p, numero_ot: String(maxOT + 1) }))
+      })
+  }, [esEdicion, modulo?.id, form.contratista_id, anioActivo])
 
   useEffect(() => {
     if (esEdicion && par?.length) {
